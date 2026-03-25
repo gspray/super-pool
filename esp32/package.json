@@ -1,0 +1,8 @@
+{
+  "name": "esp32-sprinkler",
+  "private": true,
+  "scripts": {
+    "test":         "cd tests && npm test",
+    "test:verbose": "cd tests && npm run test:verbose"
+  }
+}

@@ -1,0 +1,10 @@
+{
+	"name": "Sprinkler",
+	"short_name": "Sprinkler",
+	"description": "ESP32 sprinkler controller dashboard",
+	"start_url": "/",
+	"display": "standalone",
+	"background_color": "#f3f5f7",
+	"theme_color": "#0f6cbd",
+	"icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

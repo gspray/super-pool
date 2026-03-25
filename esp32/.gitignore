@@ -1,0 +1,6 @@
+.pio/
+.pioenvs/
+.piolibdeps/
+.vscode/
+include/secrets.h
+tests/node_modules/

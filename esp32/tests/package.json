@@ -1,0 +1,22 @@
+{
+  "name": "esp32-sprinkler-tests",
+  "version": "1.0.0",
+  "description": "Integration tests for the ESP32 sprinkler controller",
+  "private": true,
+  "scripts": {
+    "test": "jest --runInBand",
+    "test:verbose": "jest --runInBand --verbose"
+  },
+  "dependencies": {
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testTimeout": 15000,
+    "testMatch": ["**/*.test.js"],
+    "bail": 1
+  }
+}
