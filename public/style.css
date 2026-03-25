@@ -60,8 +60,8 @@ body {
     background: none;
     border: none;
     cursor: pointer;
-    font-size: 1.3rem;
-    padding: .2rem .4rem;
+    font-size: 1.95rem;
+    padding: .3rem .6rem;
     border-radius: var(--radius-sm);
     transition: background var(--transition);
 }
@@ -225,13 +225,15 @@ body {
     flex-shrink: 0;
 }
 
-select.duration-select {
-    font-size: .78rem;
-    padding: .25rem .3rem;
+input.duration-select {
+    font-size: 1.17rem;
+    padding: .38rem .45rem;
     border: 1px solid var(--border);
     border-radius: 6px;
     background: var(--bg);
     color: var(--text);
+    width: 5.7rem;
+    text-align: center;
 }
 
 /* schedule slots */
@@ -260,8 +262,8 @@ select.duration-select {
 }
 
 input.sched-time {
-    font-size: .8rem;
-    padding: .22rem .4rem;
+    font-size: 1.2rem;
+    padding: .33rem .6rem;
     border: 1px solid var(--border);
     border-radius: 6px;
     background: var(--surface);
@@ -273,19 +275,22 @@ input.sched-time:focus {
     border-color: var(--blue);
 }
 
-select.sched-duration {
-    font-size: .78rem;
-    padding: .22rem .3rem;
+input.sched-duration {
+    font-size: 1.17rem;
+    padding: .33rem .45rem;
     border: 1px solid var(--border);
     border-radius: 6px;
     background: var(--surface);
     color: var(--text);
+    width: 5.7rem;
+    text-align: center;
 }
 
 .days-row {
     display: flex;
-    gap: .25rem;
+    gap: .55rem;
     flex-wrap: wrap;
+    align-items: flex-end;
 }
 
 .day-cb {
@@ -303,17 +308,53 @@ select.sched-duration {
     line-height: 1;
 }
 
+.day-cb-all {
+    margin-right: .2rem;
+    padding-right: .6rem;
+    border-right: 1px solid var(--border);
+}
+
+.day-cb-all span {
+    color: var(--blue);
+    font-size: .68rem;
+}
+
 .day-cb input[type=checkbox] {
-    width: 1.05rem;
-    height: 1.05rem;
+    width: 1.58rem;
+    height: 1.58rem;
     accent-color: var(--blue);
     cursor: pointer;
 }
 
-.zone-sched-footer {
+.zone-sched-area {
+    min-height: 1.2rem;
     display: flex;
     justify-content: flex-end;
-    padding-top: .15rem;
+    padding-top: .1rem;
+}
+
+.sched-save-status {
+    font-size: .72rem;
+    transition: opacity .3s;
+}
+
+.sched-save-status.saving {
+    color: var(--text-muted);
+}
+
+.sched-save-status.saved {
+    color: var(--green);
+}
+
+.sched-save-status.error {
+    color: var(--red);
+}
+
+.settings-hint {
+    font-size: .82rem;
+    color: var(--text-muted);
+    margin: -.2rem 0 .6rem;
+    line-height: 1.4;
 }
 
 /* ── Buttons ─────────────────────────────────────────────────────────────────── */
@@ -322,9 +363,9 @@ select.sched-duration {
     align-items: center;
     justify-content: center;
     gap: .35rem;
-    padding: .42rem .85rem;
+    padding: .63rem 1.28rem;
     border-radius: var(--radius-sm);
-    font-size: .85rem;
+    font-size: 1.28rem;
     font-weight: 600;
     border: none;
     cursor: pointer;
@@ -375,8 +416,8 @@ select.sched-duration {
 }
 
 .btn-sm {
-    padding: .28rem .6rem;
-    font-size: .78rem;
+    padding: .42rem .9rem;
+    font-size: 1.17rem;
 }
 
 .btn-run {
@@ -384,17 +425,17 @@ select.sched-duration {
     color: #fff;
 }
 
+.btn-run:hover:not(:disabled) {
+    filter: brightness(1.1);
+}
+
 .btn-stop {
     background: var(--orange);
     color: #fff;
 }
 
-/* ── All-off footer ──────────────────────────────────────────────────────────── */
-.ctrl-footer {
-    padding: .6rem 1rem .9rem;
-    display: flex;
-    justify-content: flex-end;
-    border-top: 1px solid var(--border);
+.btn-stop:hover:not(:disabled) {
+    filter: brightness(1.1);
 }
 
 /* ── Settings page ───────────────────────────────────────────────────────────── */
@@ -469,6 +510,42 @@ select.sched-duration {
     gap: .6rem;
 }
 
+/* ── Confirm overlay (nested-safe, sits above everything) ──────────────────── */
+.confirm-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, .5);
+    z-index: 400;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+}
+
+.confirm-box {
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 1.4rem 1.5rem 1.1rem;
+    max-width: 340px;
+    width: 100%;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, .25);
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.confirm-msg {
+    font-size: .95rem;
+    margin: 0;
+    line-height: 1.4;
+}
+
+.confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: .6rem;
+}
+
 /* ── Forms ───────────────────────────────────────────────────────────────────── */
 .form-group {
     display: flex;
@@ -485,10 +562,10 @@ select.sched-duration {
 .form-group input,
 .form-group select,
 .form-group textarea {
-    padding: .5rem .7rem;
+    padding: .75rem 1.05rem;
     border: 1.5px solid var(--border);
     border-radius: var(--radius-sm);
-    font-size: .9rem;
+    font-size: 1.35rem;
     background: var(--bg);
     color: var(--text);
     transition: border-color var(--transition);
@@ -511,8 +588,8 @@ select.sched-duration {
 
 .zone-row input {
     flex: 1;
-    padding: .38rem .6rem;
-    font-size: .85rem;
+    padding: .57rem .9rem;
+    font-size: 1.28rem;
     border: 1.5px solid var(--border);
     border-radius: var(--radius-sm);
     background: var(--bg);

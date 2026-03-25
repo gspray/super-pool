@@ -8,12 +8,14 @@
 // ── Config ──────────────────────────────────────────────────────────────────
 const API_BASE = '';          // same origin
 const POLL_MS = 10_000;     // refresh UI every 10 s
-const DEFAULT_MINS = 10;
-const DURATION_OPTIONS = [5, 10, 15, 20, 30];
+const DEFAULT_MINS = 5;
 
 // ── State ───────────────────────────────────────────────────────────────────
 let controllers = [];          // cached controller list
+let appSettings = {};          // cached server settings
 let pollTimer = null;
+let countdownTimer = null;
+const countdownEnds = new Map(); // ctrlId → absolute end timestamp (ms)
 let activeView = 'dashboard'; // 'dashboard' | 'settings'
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
@@ -43,6 +45,13 @@ function toast(msg, type = '') {
 // ── API key (stored in localStorage) ────────────────────────────────────────
 function getApiKey() { return localStorage.getItem('sprinkler_api_key') || ''; }
 function setApiKey(k) { localStorage.setItem('sprinkler_api_key', k); }
+
+function getLastDuration(ctrlId, zoneId) {
+    return parseInt(localStorage.getItem(`sprinkler_dur_${ctrlId}_${zoneId}`), 10) || DEFAULT_MINS;
+}
+function setLastDuration(ctrlId, zoneId, mins) {
+    localStorage.setItem(`sprinkler_dur_${ctrlId}_${zoneId}`, mins);
+}
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 async function api(method, path, body) {
@@ -77,10 +86,26 @@ function fmtSec(s) {
 async function loadControllers() {
     try {
         controllers = await GET('/api/controllers');
+        // Update countdown end timestamps: stamp once on start, clear on stop
+        controllers.forEach(ctrl => {
+            const s = ctrl.status || {};
+            if (s.manualRun && s.activeZone) {
+                if (!countdownEnds.has(ctrl.id)) {
+                    countdownEnds.set(ctrl.id, Date.now() + (s.remainingSec || 0) * 1000);
+                }
+            } else {
+                countdownEnds.delete(ctrl.id);
+            }
+        });
         renderDashboard();
     } catch (e) {
         $main.innerHTML = `<p class="loading" style="color:var(--red)">Failed to load: ${e.message}</p>`;
     }
+}
+
+async function loadAppSettings() {
+    try { appSettings = await GET('/api/settings'); }
+    catch { appSettings = {}; }
 }
 
 // ── Poll loop ─────────────────────────────────────────────────────────────────
@@ -90,6 +115,19 @@ function startPolling() {
         if (activeView !== 'dashboard') return;
         await loadControllers();
     }, POLL_MS);
+}
+
+// ── Countdown tick ────────────────────────────────────────────────────────────
+function tickCountdown() {
+    document.querySelectorAll('.countdown[data-ends]').forEach(el => {
+        const remaining = Math.max(0, Math.round((parseInt(el.dataset.ends, 10) - Date.now()) / 1000));
+        el.textContent = fmtSec(remaining);
+    });
+}
+
+function startCountdown() {
+    if (countdownTimer) clearInterval(countdownTimer);
+    countdownTimer = setInterval(tickCountdown, 1000);
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -146,7 +184,8 @@ function buildCtrlCard(ctrl) {
     if (status.manualRun && status.activeZone) {
         const zone = zones.find(z => z.id === status.activeZone);
         const zName = zone ? zone.name : `Zone ${status.activeZone}`;
-        bar.innerHTML = `▶ ${esc(zName)} running — <span class="countdown">${fmtSec(status.remainingSec || 0)}</span> remaining`;
+        const endsAt = countdownEnds.get(ctrl.id) ?? Date.now();
+        bar.innerHTML = `▶ ${esc(zName)} running — <span class="countdown" data-ends="${endsAt}">${fmtSec(Math.max(0, Math.round((endsAt - Date.now()) / 1000)))}</span> remaining`;
     }
     body.appendChild(bar);
 
@@ -159,17 +198,6 @@ function buildCtrlCard(ctrl) {
         zones.forEach(zone => grid.appendChild(buildZoneCard(ctrl, zone, status)));
     }
     body.appendChild(grid);
-
-    // ── Footer
-    const footer = document.createElement('div');
-    footer.className = 'ctrl-footer';
-    const btnAllOff = document.createElement('button');
-    btnAllOff.className = 'btn btn-danger btn-sm';
-    btnAllOff.textContent = '⏹ All Off';
-    btnAllOff.disabled = !online;
-    btnAllOff.addEventListener('click', e => { e.stopPropagation(); handleAllOff(ctrl.id); });
-    footer.appendChild(btnAllOff);
-    body.appendChild(footer);
 
     card.appendChild(body);
 
@@ -184,11 +212,17 @@ function buildCtrlCard(ctrl) {
     return card;
 }
 
+// ── Debounce ─────────────────────────────────────────────────────────────────
+function debounce(fn, ms) {
+    let t;
+    return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}
+
 // ── Schedule helpers ──────────────────────────────────────────────────────────
 const DAY_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
 function emptySchedule() {
-    return { enabled: false, startTime: '07:00', durationMin: 10, days: [false, false, false, false, false, false, false] };
+    return { enabled: false, startTime: '07:00', durationMin: 5, days: [false, false, false, false, false, false, false] };
 }
 
 function buildScheduleSlot(idx, sched) {
@@ -216,38 +250,62 @@ function buildScheduleSlot(idx, sched) {
     timeInput.className = 'sched-time';
     timeInput.value = s.startTime || '07:00';
 
-    const durSel = document.createElement('select');
-    durSel.className = 'sched-duration';
-    DURATION_OPTIONS.forEach(m => {
-        const opt = document.createElement('option');
-        opt.value = m;
-        opt.textContent = `${m} min`;
-        if (m === (s.durationMin || 10)) opt.selected = true;
-        durSel.appendChild(opt);
-    });
+    const durInput = document.createElement('input');
+    durInput.type = 'number';
+    durInput.className = 'sched-duration';
+    durInput.min = 1;
+    durInput.max = 120;
+    durInput.value = s.durationMin || 5;
+    durInput.setAttribute('aria-label', 'Duration (minutes)');
 
     row.appendChild(enabledCb);
     row.appendChild(lbl);
     row.appendChild(timeInput);
-    row.appendChild(durSel);
+    row.appendChild(durInput);
     wrap.appendChild(row);
 
     // ── row 2: day checkboxes
     const daysRow = document.createElement('div');
     daysRow.className = 'days-row';
+
+    // "All" toggle
+    const allLbl = document.createElement('label');
+    allLbl.className = 'day-cb day-cb-all';
+    const allCb = document.createElement('input');
+    allCb.type = 'checkbox';
+    const days = s.days || [];
+    allCb.checked = days.length > 0 && days.every(Boolean);
+    allCb.title = 'Toggle all days';
+    const allSpan = document.createElement('span');
+    allSpan.textContent = 'All';
+    allLbl.appendChild(allCb);
+    allLbl.appendChild(allSpan);
+    daysRow.appendChild(allLbl);
+
+    const dayCbs = [];
     DAY_LABELS.forEach((d, di) => {
         const dayLbl = document.createElement('label');
         dayLbl.className = 'day-cb';
         const cb = document.createElement('input');
         cb.type = 'checkbox';
-        cb.checked = !!(s.days || [])[di];
+        cb.checked = !!days[di];
         cb.dataset.day = di;
         const span = document.createElement('span');
         span.textContent = d;
         dayLbl.appendChild(cb);
         dayLbl.appendChild(span);
         daysRow.appendChild(dayLbl);
+        dayCbs.push(cb);
     });
+
+    // All checkbox logic
+    allCb.addEventListener('change', () => {
+        dayCbs.forEach(cb => { cb.checked = allCb.checked; });
+    });
+    dayCbs.forEach(cb => cb.addEventListener('change', () => {
+        allCb.checked = dayCbs.every(c => c.checked);
+    }));
+
     wrap.appendChild(daysRow);
 
     return wrap;
@@ -259,18 +317,14 @@ function readScheduleSlot(zCard, idx) {
     return {
         enabled: slot.querySelector('.sched-enabled').checked,
         startTime: slot.querySelector('.sched-time').value || '07:00',
-        durationMin: parseInt(slot.querySelector('.sched-duration').value, 10) || 10,
-        days: Array.from(slot.querySelectorAll('.day-cb input[type=checkbox]')).map(cb => cb.checked),
+        durationMin: parseInt(slot.querySelector('.sched-duration').value, 10) || 5,
+        days: Array.from(slot.querySelectorAll('.day-cb input[data-day]')).map(cb => cb.checked),
     };
 }
 
 async function saveZoneSchedule(ctrl, zoneId, schedules) {
     const zones = (ctrl.config?.zones || []).map(z => z.id === zoneId ? { ...z, schedules } : z);
-    try {
-        const result = await PUT(`/api/controllers/${ctrl.id}/config`, { ...ctrl.config, zones });
-        toast(result.pushed ? 'Schedule saved & pushed to ESP ✓' : 'Schedule saved — ESP offline', result.pushed ? 'success' : 'error');
-        await loadControllers();
-    } catch (e) { toast(e.message, 'error'); }
+    await PUT(`/api/controllers/${ctrl.id}/config`, { ...ctrl.config, zones });
 }
 
 // ── Zone card ─────────────────────────────────────────────────────────────────
@@ -294,55 +348,73 @@ function buildZoneCard(ctrl, zone, status) {
     const controls = document.createElement('div');
     controls.className = 'zone-controls';
 
-    const sel = document.createElement('select');
+    const sel = document.createElement('input');
+    sel.type = 'number';
     sel.className = 'duration-select';
-    sel.setAttribute('aria-label', 'Duration');
-    DURATION_OPTIONS.forEach(m => {
-        const opt = document.createElement('option');
-        opt.value = m;
-        opt.textContent = `${m} min`;
-        if (m === DEFAULT_MINS) opt.selected = true;
-        sel.appendChild(opt);
-    });
+    sel.min = 1;
+    sel.max = 120;
+    sel.value = getLastDuration(ctrl.id, zone.id);
+    sel.setAttribute('aria-label', 'Duration (minutes)');
     controls.appendChild(sel);
 
-    if (isActive) {
-        const btnStop = document.createElement('button');
-        btnStop.className = 'btn btn-stop btn-sm';
-        btnStop.textContent = '⏹';
-        btnStop.title = 'Stop';
-        btnStop.addEventListener('click', () => handleManual(ctrl.id, zone.id, false));
-        controls.appendChild(btnStop);
-    } else {
-        const btnRun = document.createElement('button');
-        btnRun.className = 'btn btn-run btn-sm';
-        btnRun.textContent = '▶';
-        btnRun.title = `Run zone ${zone.id}`;
-        btnRun.disabled = !online;
-        btnRun.addEventListener('click', () =>
-            handleManual(ctrl.id, zone.id, true, parseInt(sel.value, 10)));
-        controls.appendChild(btnRun);
-    }
+    const btnRun = document.createElement('button');
+    btnRun.className = 'btn btn-run btn-sm';
+    btnRun.textContent = '▶';
+    btnRun.title = `Run zone ${zone.id}`;
+    btnRun.disabled = !online || isActive;
+    btnRun.addEventListener('click', () => {
+        const mins = parseInt(sel.value, 10);
+        setLastDuration(ctrl.id, zone.id, mins);
+        handleManual(ctrl.id, zone.id, true, mins);
+    });
+    controls.appendChild(btnRun);
+
+    const btnStop = document.createElement('button');
+    btnStop.className = 'btn btn-stop btn-sm';
+    btnStop.textContent = '⏹';
+    btnStop.title = 'Stop';
+    btnStop.disabled = !isActive;
+    btnStop.addEventListener('click', () => handleManual(ctrl.id, zone.id, false));
+    controls.appendChild(btnStop);
 
     header.appendChild(controls);
     zCard.appendChild(header);
 
     // ── Schedule slots
-    zCard.appendChild(buildScheduleSlot(0, schedules[0]));
-    zCard.appendChild(buildScheduleSlot(1, schedules[1]));
+    const slot0 = buildScheduleSlot(0, schedules[0]);
+    const slot1 = buildScheduleSlot(1, schedules[1]);
+    zCard.appendChild(slot0);
+    zCard.appendChild(slot1);
 
-    // ── Save schedule footer
-    const schedFooter = document.createElement('div');
-    schedFooter.className = 'zone-sched-footer';
-    const btnSave = document.createElement('button');
-    btnSave.className = 'btn btn-primary btn-sm';
-    btnSave.textContent = '💾 Save schedule';
-    btnSave.addEventListener('click', () => {
+    // ── Auto-save schedules on any change (debounced)
+    const schedArea = document.createElement('div');
+    schedArea.className = 'zone-sched-area';
+    const saveStatus = document.createElement('span');
+    saveStatus.className = 'sched-save-status';
+    schedArea.appendChild(saveStatus);
+    zCard.appendChild(schedArea);
+
+    const doSave = debounce(async () => {
+        saveStatus.textContent = 'Saving…';
+        saveStatus.className = 'sched-save-status saving';
         const newSchedules = [readScheduleSlot(zCard, 0), readScheduleSlot(zCard, 1)];
-        saveZoneSchedule(ctrl, zone.id, newSchedules);
+        try {
+            await saveZoneSchedule(ctrl, zone.id, newSchedules);
+            saveStatus.textContent = 'Saved ✓';
+            saveStatus.className = 'sched-save-status saved';
+            setTimeout(() => { saveStatus.textContent = ''; saveStatus.className = 'sched-save-status'; }, 2000);
+        } catch {
+            saveStatus.textContent = 'Save failed';
+            saveStatus.className = 'sched-save-status error';
+        }
+    }, 1200);
+
+    zCard.addEventListener('change', e => {
+        if (e.target.closest('.schedule-slot')) doSave();
     });
-    schedFooter.appendChild(btnSave);
-    zCard.appendChild(schedFooter);
+    zCard.addEventListener('input', e => {
+        if (e.target.closest('.schedule-slot')) doSave();
+    });
 
     return zCard;
 }
@@ -350,20 +422,16 @@ function buildZoneCard(ctrl, zone, status) {
 // ── Actions ───────────────────────────────────────────────────────────────────
 async function handleManual(ctrlId, zoneId, on, durationMin) {
     try {
+        if (on) {
+            countdownEnds.set(ctrlId, Date.now() + (durationMin || 0) * 60 * 1000);
+        } else {
+            countdownEnds.delete(ctrlId);
+        }
         await POST(`/api/controllers/${ctrlId}/manual`, { zone: zoneId, on, durationMin });
         toast(on ? `Zone ${zoneId} started` : `Zone ${zoneId} stopped`, 'success');
         await loadControllers();
     } catch (e) {
-        toast(`Error: ${e.message}`, 'error');
-    }
-}
-
-async function handleAllOff(ctrlId) {
-    try {
-        await POST(`/api/controllers/${ctrlId}/alloff`, {});
-        toast('All zones stopped', 'success');
-        await loadControllers();
-    } catch (e) {
+        if (on) countdownEnds.delete(ctrlId); // roll back on failure
         toast(`Error: ${e.message}`, 'error');
     }
 }
@@ -389,6 +457,72 @@ function renderSettings() {
         const val = document.getElementById('f-apikey').value.trim();
         setApiKey(val);
         toast('API key saved', 'success');
+    });
+
+    // ── Watchdog section
+    const wdSection = document.createElement('div');
+    wdSection.className = 'settings-section';
+    const maxMin = appSettings.maxZoneMinutes ?? 30;
+    wdSection.innerHTML = `
+      <h3>Watchdog</h3>
+      <p class="settings-hint">Independent safety timer. If a zone runs longer than this limit the server
+        will force it off, even if the app is closed.</p>
+      <div class="form-group" style="flex-direction:row;align-items:center;gap:.5rem">
+        <label style="white-space:nowrap">Max zone runtime</label>
+        <input id="f-max-min" type="number" min="0" step="1" value="${maxMin}"
+               style="width:5rem" />
+        <span style="color:var(--text-muted);font-size:.85rem">minutes &nbsp;(0 = disabled)</span>
+        <button id="btn-save-wd" class="btn btn-primary btn-sm" style="margin-left:auto">Save</button>
+      </div>`;
+    $main.appendChild(wdSection);
+    document.getElementById('btn-save-wd').addEventListener('click', async () => {
+        const val = parseInt(document.getElementById('f-max-min').value, 10);
+        if (!Number.isFinite(val) || val < 0) return toast('Enter a valid number (0 to disable)', 'error');
+        try {
+            appSettings = await PUT('/api/settings', { maxZoneMinutes: val });
+            toast(val === 0 ? 'Watchdog disabled' : `Watchdog set to ${val} min`, 'success');
+        } catch (e) { toast(e.message, 'error'); }
+    });
+
+    // ── Email report section
+    const emailSection = document.createElement('div');
+    emailSection.className = 'settings-section';
+    emailSection.innerHTML = `
+      <h3>Daily Email Report</h3>
+      <p class="settings-hint">Sends a summary of all zones that ran at 11:59 pm each day using your Gmail account.
+        Gmail requires an <strong>App Password</strong> — enable 2-Step Verification on your Google account then
+        create an App Password at <a href="https://myaccount.google.com/apppasswords" target="_blank">myaccount.google.com/apppasswords</a>.</p>
+      <div class="form-group" style="flex-direction:row;align-items:center;gap:.5rem;margin-bottom:.9rem">
+        <label style="white-space:nowrap;margin-bottom:0">Enable</label>
+        <input id="f-email-enabled" type="checkbox" style="width:1.58rem;height:1.58rem;accent-color:var(--blue);cursor:pointer;flex-shrink:0"
+               ${appSettings.emailEnabled ? 'checked' : ''} />
+      </div>
+      <div class="form-group">
+        <label>Send report to</label>
+        <input id="f-email-to" type="email" placeholder="you@example.com" value="${esc(appSettings.emailTo || '')}" />
+      </div>
+      <div class="form-group">
+        <label>Gmail address (sender)</label>
+        <input id="f-email-user" type="email" placeholder="yourname@gmail.com" value="${esc(appSettings.emailUser || '')}" />
+      </div>
+      <div class="form-group">
+        <label>Gmail App Password</label>
+        <input id="f-email-pass" type="password" placeholder="xxxx xxxx xxxx xxxx" autocomplete="new-password"
+               value="${esc(appSettings.emailPass || '')}" />
+      </div>
+      <button id="btn-save-email" class="btn btn-primary btn-sm">Save Email Settings</button>`;
+    $main.appendChild(emailSection);
+    document.getElementById('btn-save-email').addEventListener('click', async () => {
+        const patch = {
+            emailEnabled: document.getElementById('f-email-enabled').checked,
+            emailTo: document.getElementById('f-email-to').value.trim(),
+            emailUser: document.getElementById('f-email-user').value.trim(),
+            emailPass: document.getElementById('f-email-pass').value,
+        };
+        try {
+            appSettings = await PUT('/api/settings', patch);
+            toast('Email settings saved', 'success');
+        } catch (e) { toast(e.message, 'error'); }
     });
 
     const section = document.createElement('div');
@@ -459,6 +593,32 @@ function closeModal(value) {
 $modalOk.addEventListener('click', () => closeModal(true));
 $modalCx.addEventListener('click', () => closeModal(false));
 
+/**
+ * Lightweight confirm overlay — independent of the main modal so it can be
+ * used inside the zone editor without clobbering _modalResolve.
+ */
+function confirmDialog(message) {
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'confirm-overlay';
+        overlay.innerHTML = `
+          <div class="confirm-box">
+            <p class="confirm-msg">${esc(message)}</p>
+            <div class="confirm-actions">
+              <button class="btn btn-ghost btn-sm" data-v="cancel">Cancel</button>
+              <button class="btn btn-danger btn-sm" data-v="ok">Delete</button>
+            </div>
+          </div>`;
+        document.body.appendChild(overlay);
+        overlay.addEventListener('click', e => {
+            const v = e.target.closest('[data-v]')?.dataset.v;
+            if (!v) return;
+            overlay.remove();
+            resolve(v === 'ok');
+        });
+    });
+}
+
 // ── Add controller ────────────────────────────────────────────────────────────
 function openAddController() {
     openModal('Add Controller', `
@@ -505,7 +665,7 @@ function openEditController(ctrl) {
 
 // ── Delete controller ─────────────────────────────────────────────────────────
 async function handleDeleteController(id) {
-    if (!confirm(`Delete controller "${id}"?`)) return;
+    if (!await confirmDialog(`Delete controller "${id}"?`)) return;
     try {
         await DELETE(`/api/controllers/${id}`);
         toast('Deleted', 'success');
@@ -545,9 +705,12 @@ function openEditZones(ctrl) {
         });
     }
 
-    $modalBody.addEventListener('click', e => {
+    $modalBody.addEventListener('click', async e => {
         if (e.target.classList.contains('z-del')) {
-            const i = parseInt(e.target.closest('[data-i]').dataset.i, 10);
+            const row = e.target.closest('[data-i]');
+            const zoneName = row.querySelector('.z-name').value.trim() || `Zone ${parseInt(row.dataset.i, 10) + 1}`;
+            if (!await confirmDialog(`Remove zone "${zoneName}"?`)) return;
+            const i = parseInt(row.dataset.i, 10);
             syncZoneRows();
             zones.splice(i, 1);
             document.getElementById('zone-rows').innerHTML = buildZoneRows();
@@ -591,7 +754,7 @@ $btnSettings.addEventListener('click', () => {
         clearInterval(pollTimer);
         activeView = 'settings';
         $btnSettings.title = 'Dashboard';
-        loadControllers().then(renderSettings);
+        Promise.all([loadControllers(), loadAppSettings()]).then(() => renderSettings());
     }
     $btnSettings.textContent = activeView === 'settings' ? '🏠' : '⚙️';
 });
@@ -606,5 +769,7 @@ function esc(s) {
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
+loadAppSettings();
 loadControllers();
 startPolling();
+startCountdown();

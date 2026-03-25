@@ -138,6 +138,7 @@ router.post('/:id/manual', async (req, res) => {
                 activeZone: zone,
                 manualRun: true,
                 remainingSec: (durationMin || 0) * 60,
+                zoneStartedAt: new Date().toISOString(),
                 online: true,
                 lastSeen: new Date().toISOString(),
             });
@@ -146,6 +147,7 @@ router.post('/:id/manual', async (req, res) => {
                 activeZone: null,
                 manualRun: false,
                 remainingSec: 0,
+                zoneStartedAt: null,
                 online: true,
                 lastSeen: new Date().toISOString(),
             });
@@ -169,6 +171,7 @@ router.post('/:id/alloff', async (req, res) => {
             activeZone: null,
             manualRun: false,
             remainingSec: 0,
+            zoneStartedAt: null,
             online: true,
             lastSeen: new Date().toISOString(),
         });

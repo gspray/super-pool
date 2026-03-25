@@ -17,6 +17,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <ESPmDNS.h>
 #include <WebServer.h>
 #include <ArduinoJson.h>
 
@@ -163,6 +164,9 @@ void handleConfig() {
 void connectWiFi() {
     Serial.printf("[wifi] connecting to %s", WIFI_SSID);
     WiFi.mode(WIFI_STA);
+    WiFi.disconnect(true);   // clear old DHCP state so new hostname is sent
+    delay(100);
+    WiFi.setHostname(HOSTNAME);
     WiFi.begin(WIFI_SSID, WIFI_PASS);
     unsigned long t = millis();
     while (WiFi.status() != WL_CONNECTED && millis() - t < 20000) {
@@ -171,6 +175,9 @@ void connectWiFi() {
     }
     if (WiFi.status() == WL_CONNECTED) {
         Serial.printf("\n[wifi] connected  IP=%s\n", WiFi.localIP().toString().c_str());
+        if (MDNS.begin(HOSTNAME)) {
+            Serial.printf("[mdns] reachable at http://%s.local\n", HOSTNAME);
+        }
     } else {
         Serial.println("\n[wifi] failed — will retry");
     }
@@ -216,6 +223,16 @@ void setup() {
         relayOff(RELAY_PINS[i]);
     }
     Serial.printf("[relay] %d zone pins initialised (all OFF)\n", MAX_ZONES);
+
+    // Startup test — flash each LED in sequence for 1 second
+    Serial.println("[test] LED startup sequence");
+    for (int i = 0; i < MAX_ZONES; i++) {
+        relayOn(RELAY_PINS[i]);
+        Serial.printf("[test] zone %d ON\n", i + 1);
+        delay(1000);
+        relayOff(RELAY_PINS[i]);
+    }
+    Serial.println("[test] sequence complete");
 
     connectWiFi();
 
