@@ -56,6 +56,82 @@ body {
     letter-spacing: -.01em;
 }
 
+.esp-clock {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, .92);
+    letter-spacing: .02em;
+    flex: 1;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    line-height: 1.15;
+}
+
+.esp-clock-label {
+    font-size: .65rem;
+    font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: rgba(255, 255, 255, .55);
+    line-height: 1;
+}
+
+.battery-indicator {
+    display: flex;
+    align-items: center;
+    gap: .25rem;
+    font-size: .78rem;
+    color: rgba(255, 255, 255, .9);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.battery-indicator.hidden {
+    display: none;
+}
+
+.battery-bar {
+    width: 28px;
+    height: 13px;
+    border: 2px solid rgba(255, 255, 255, .8);
+    border-radius: 3px;
+    position: relative;
+    display: inline-block;
+}
+
+.battery-bar::after {
+    content: '';
+    position: absolute;
+    right: -5px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 6px;
+    background: rgba(255, 255, 255, .8);
+    border-radius: 0 2px 2px 0;
+}
+
+.battery-fill {
+    height: 100%;
+    border-radius: 1px;
+    transition: width .6s ease, background .6s ease;
+}
+
+.battery-fill.high {
+    background: #6fcf97;
+}
+
+.battery-fill.medium {
+    background: #f2c94c;
+}
+
+.battery-fill.low {
+    background: #eb5757;
+}
+
 .icon-btn {
     background: none;
     border: none;
@@ -151,6 +227,11 @@ body {
 .status-badge.offline {
     background: #fde7e9;
     color: var(--red);
+}
+
+.status-badge.warming {
+    background: #fff4ce;
+    color: #835b00;
 }
 
 .ctrl-status-bar {

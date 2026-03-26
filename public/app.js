@@ -1,24 +1,29 @@
 /* ────────────────────────────────────────────────────────────────────────────
    Sprinkler PWA — app.js
-   Pure vanilla ES2020; no bundler needed.
+   Single ESP32 controller, direct HTTP calls, no server required.
 ──────────────────────────────────────────────────────────────────────────── */
 
 'use strict';
 
-// ── Config ──────────────────────────────────────────────────────────────────
-const API_BASE = '';          // same origin
-const POLL_MS = 10_000;     // refresh UI every 10 s
+// ── Config ───────────────────────────────────────────────────────────────────
+const POLL_MS = 10_000;  // idle poll interval
+const POLL_FAST_MS = 2_000;  // poll interval when a zone is running
 const DEFAULT_MINS = 5;
 
-// ── State ───────────────────────────────────────────────────────────────────
-let controllers = [];          // cached controller list
-let appSettings = {};          // cached server settings
+// ── State ────────────────────────────────────────────────────────────────────
+let esp = null;        // { url, name } from localStorage
+let status = {};       // latest GET /api/status
+let config = {};       // latest GET /api/config  { zones, configVersion }
+let endsAt = 0;        // countdown end timestamp (ms)
+let lastOnlineAt = 0;  // Date.now() of last successful contact
 let pollTimer = null;
 let countdownTimer = null;
-const countdownEnds = new Map(); // ctrlId → absolute end timestamp (ms)
-let activeView = 'dashboard'; // 'dashboard' | 'settings'
+let activeView = 'dashboard';
+let espEpochAtFetch = 0;       // epoch seconds from ESP at time of last fetch
+let localMsAtFetch = 0;        // Date.now() when that fetch happened
+let renderedConfigVersion = -1; // configVersion of the last full dashboard render
 
-// ── DOM refs ─────────────────────────────────────────────────────────────────
+// ── DOM refs ──────────────────────────────────────────────────────────────
 const $main = document.getElementById('main');
 const $backdrop = document.getElementById('modal-backdrop');
 const $modalTitle = document.getElementById('modal-title');
@@ -26,6 +31,42 @@ const $modalBody = document.getElementById('modal-body');
 const $modalOk = document.getElementById('modal-confirm');
 const $modalCx = document.getElementById('modal-cancel');
 const $btnSettings = document.getElementById('btn-settings');
+const $appTitle = document.getElementById('app-title');
+const $espClock = document.getElementById('esp-clock');
+const $batteryIndicator = document.getElementById('battery-indicator');
+
+// ── Persistence ───────────────────────────────────────────────────────────────
+function getApiKey() { return localStorage.getItem('sprinkler_api_key') || ''; }
+function setApiKey(k) { localStorage.setItem('sprinkler_api_key', k); }
+
+function getEsp() {
+    try { return JSON.parse(localStorage.getItem('sprinkler_esp') || 'null'); }
+    catch { return null; }
+}
+function saveEsp(obj) {
+    localStorage.setItem('sprinkler_esp', obj ? JSON.stringify(obj) : 'null');
+}
+
+function getLastDuration(zoneId) {
+    return parseInt(localStorage.getItem(`sprinkler_dur_${zoneId}`), 10) || DEFAULT_MINS;
+}
+function setLastDuration(zoneId, mins) {
+    localStorage.setItem(`sprinkler_dur_${zoneId}`, mins);
+}
+
+// ── ESP HTTP helper ───────────────────────────────────────────────────────────
+async function espFetch(method, path, body) {
+    if (!esp) throw new Error('No ESP configured');
+    const opts = {
+        method,
+        headers: { 'Content-Type': 'application/json', 'x-api-key': getApiKey() },
+    };
+    if (body != null) opts.body = JSON.stringify(body);
+    const res = await fetch(`${esp.url}${path}`, opts);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+}
 
 // ── Toast ────────────────────────────────────────────────────────────────────
 let $toastWrap;
@@ -42,38 +83,12 @@ function toast(msg, type = '') {
     setTimeout(() => el.remove(), 3200);
 }
 
-// ── API key (stored in localStorage) ────────────────────────────────────────
-function getApiKey() { return localStorage.getItem('sprinkler_api_key') || ''; }
-function setApiKey(k) { localStorage.setItem('sprinkler_api_key', k); }
-
-function getLastDuration(ctrlId, zoneId) {
-    return parseInt(localStorage.getItem(`sprinkler_dur_${ctrlId}_${zoneId}`), 10) || DEFAULT_MINS;
+// ── Tiny HTML escape ──────────────────────────────────────────────────────────
+function esc(s) {
+    return String(s ?? '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
-function setLastDuration(ctrlId, zoneId, mins) {
-    localStorage.setItem(`sprinkler_dur_${ctrlId}_${zoneId}`, mins);
-}
-
-// ── API helpers ───────────────────────────────────────────────────────────────
-async function api(method, path, body) {
-    const opts = {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-    };
-    if (method !== 'GET') {
-        const key = getApiKey();
-        if (key) opts.headers['x-api-key'] = key;
-    }
-    if (body != null) opts.body = JSON.stringify(body);
-    const res = await fetch(`${API_BASE}${path}`, opts);
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-    return data;
-}
-
-const GET = (p) => api('GET', p);
-const POST = (p, b) => api('POST', p, b);
-const PUT = (p, b) => api('PUT', p, b);
-const DELETE = (p) => api('DELETE', p);
 
 // ── Formatting ────────────────────────────────────────────────────────────────
 function fmtSec(s) {
@@ -82,147 +97,304 @@ function fmtSec(s) {
     return `${m}:${String(r).padStart(2, '0')}`;
 }
 
-// ── Data loading ──────────────────────────────────────────────────────────────
-async function loadControllers() {
-    try {
-        controllers = await GET('/api/controllers');
-        // Update countdown end timestamps: stamp once on start, clear on stop
-        controllers.forEach(ctrl => {
-            const s = ctrl.status || {};
-            if (s.manualRun && s.activeZone) {
-                if (!countdownEnds.has(ctrl.id)) {
-                    countdownEnds.set(ctrl.id, Date.now() + (s.remainingSec || 0) * 1000);
-                }
-            } else {
-                countdownEnds.delete(ctrl.id);
-            }
-        });
-        renderDashboard();
-    } catch (e) {
-        $main.innerHTML = `<p class="loading" style="color:var(--red)">Failed to load: ${e.message}</p>`;
-    }
-}
-
-async function loadAppSettings() {
-    try { appSettings = await GET('/api/settings'); }
-    catch { appSettings = {}; }
-}
-
-// ── Poll loop ─────────────────────────────────────────────────────────────────
-function startPolling() {
-    if (pollTimer) clearInterval(pollTimer);
-    pollTimer = setInterval(async () => {
-        if (activeView !== 'dashboard') return;
-        await loadControllers();
-    }, POLL_MS);
-}
-
-// ── Countdown tick ────────────────────────────────────────────────────────────
-function tickCountdown() {
-    document.querySelectorAll('.countdown[data-ends]').forEach(el => {
-        const remaining = Math.max(0, Math.round((parseInt(el.dataset.ends, 10) - Date.now()) / 1000));
-        el.textContent = fmtSec(remaining);
-    });
-}
-
-function startCountdown() {
-    if (countdownTimer) clearInterval(countdownTimer);
-    countdownTimer = setInterval(tickCountdown, 1000);
-}
-
-// ── Dashboard ─────────────────────────────────────────────────────────────────
-function renderDashboard() {
-    if (!controllers.length) {
-        $main.innerHTML = `<p class="loading">No controllers yet. Tap ⚙️ to add one.</p>`;
-        return;
-    }
-    $main.innerHTML = '';
-    controllers.forEach(ctrl => {
-        $main.appendChild(buildCtrlCard(ctrl));
-    });
-}
-
-function buildCtrlCard(ctrl) {
-    const status = ctrl.status || {};
-    const zones = ctrl.config?.zones || [];
-    const online = status.online;
-    const collapseKey = `ctrl_collapsed_${ctrl.id}`;
-    let collapsed = localStorage.getItem(collapseKey) === '1';
-
-    const card = document.createElement('div');
-    card.className = 'ctrl-card';
-    card.dataset.id = ctrl.id;
-
-    // ── Header
-    const hdr = document.createElement('div');
-    hdr.className = 'ctrl-header';
-
-    const nameSpan = document.createElement('span');
-    nameSpan.className = 'ctrl-name';
-    nameSpan.textContent = ctrl.name;
-
-    const badge = document.createElement('span');
-    badge.className = `status-badge ${online ? 'online' : 'offline'}`;
-    badge.textContent = online ? '● Online' : '○ Offline';
-
-    const chevron = document.createElement('span');
-    chevron.className = 'ctrl-chevron';
-    chevron.textContent = collapsed ? '▶' : '▼';
-
-    hdr.appendChild(nameSpan);
-    hdr.appendChild(badge);
-    hdr.appendChild(chevron);
-    card.appendChild(hdr);
-
-    // ── Collapsible body
-    const body = document.createElement('div');
-    body.className = 'ctrl-body' + (collapsed ? ' collapsed' : '');
-
-    // ── Active status bar
-    const bar = document.createElement('div');
-    bar.className = `ctrl-status-bar ${status.manualRun ? 'running' : 'idle'}`;
-    if (status.manualRun && status.activeZone) {
-        const zone = zones.find(z => z.id === status.activeZone);
-        const zName = zone ? zone.name : `Zone ${status.activeZone}`;
-        const endsAt = countdownEnds.get(ctrl.id) ?? Date.now();
-        bar.innerHTML = `▶ ${esc(zName)} running — <span class="countdown" data-ends="${endsAt}">${fmtSec(Math.max(0, Math.round((endsAt - Date.now()) / 1000)))}</span> remaining`;
-    }
-    body.appendChild(bar);
-
-    // ── Zones grid
-    const grid = document.createElement('div');
-    grid.className = 'zones-grid';
-    if (zones.length === 0) {
-        grid.innerHTML = `<p style="color:var(--text-muted);font-size:.85rem">No zones configured.</p>`;
-    } else {
-        zones.forEach(zone => grid.appendChild(buildZoneCard(ctrl, zone, status)));
-    }
-    body.appendChild(grid);
-
-    card.appendChild(body);
-
-    // ── Toggle collapse on header click
-    hdr.addEventListener('click', () => {
-        collapsed = !collapsed;
-        body.classList.toggle('collapsed', collapsed);
-        chevron.textContent = collapsed ? '▶' : '▼';
-        localStorage.setItem(collapseKey, collapsed ? '1' : '0');
-    });
-
-    return card;
-}
-
 // ── Debounce ─────────────────────────────────────────────────────────────────
 function debounce(fn, ms) {
     let t;
     return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
 }
 
+// ── Data loading ──────────────────────────────────────────────────────────────
+async function loadData() {
+    esp = getEsp();
+    if (!esp) { renderSetup(); return; }
+
+    try {
+        const [s, c] = await Promise.all([
+            espFetch('GET', '/api/status'),
+            espFetch('GET', '/api/config'),
+        ]);
+        status = s;
+        config = c || { zones: [] };
+        lastOnlineAt = Date.now();
+        fetchEspTime(); // fire-and-forget; updates clock header
+        updateBatteryIndicator();
+
+        if (status.manualRun && status.activeZone && !endsAt) {
+            endsAt = Date.now() + (status.remainingSec || 0) * 1000;
+        } else if (!status.manualRun) {
+            endsAt = 0;
+        }
+    } catch (e) {
+        status = { online: false, manualRun: false, activeZone: 0, remainingSec: 0 };
+        if (!config.zones) config = { zones: [] };
+    }
+
+    if (activeView === 'dashboard') {
+        const configChanged = (config.configVersion !== renderedConfigVersion);
+        const domEmpty = !$main.querySelector('.ctrl-header');
+        if (configChanged || domEmpty) {
+            renderDashboard();
+        } else {
+            patchDashboardStatus();
+        }
+    }
+}
+
+// ── Poll + countdown ──────────────────────────────────────────────────────────
+let currentPollMs = POLL_MS;
+function startPolling() {
+    if (pollTimer) clearInterval(pollTimer);
+    currentPollMs = status.manualRun ? POLL_FAST_MS : POLL_MS;
+    pollTimer = setInterval(async () => {
+        if (activeView !== 'dashboard') return;
+        await loadData();
+        // Adjust interval if run state changed
+        const desired = status.manualRun ? POLL_FAST_MS : POLL_MS;
+        if (desired !== currentPollMs) { currentPollMs = desired; startPolling(); }
+    }, currentPollMs);
+}
+
+function startCountdown() {
+    if (countdownTimer) clearInterval(countdownTimer);
+    countdownTimer = setInterval(() => {
+        let anyExpired = false;
+        document.querySelectorAll('.countdown[data-ends]').forEach(el => {
+            const rem = Math.max(0, Math.round((parseInt(el.dataset.ends, 10) - Date.now()) / 1000));
+            el.textContent = fmtSec(rem);
+            if (rem === 0) anyExpired = true;
+        });
+        // When countdown hits 0, immediately fetch status so UI updates promptly
+        if (anyExpired && endsAt && Date.now() >= endsAt) {
+            endsAt = 0;  // prevent repeated triggers
+            loadData();
+        }
+        updateEspClock();
+    }, 1000);
+}
+
+// ── ESP time ──────────────────────────────────────────────────────────────
+async function fetchEspTime() {
+    try {
+        const t = await espFetch('GET', '/api/time');
+        if (t.epoch && t.epoch > 1000000000) {
+            espEpochAtFetch = t.epoch;
+            localMsAtFetch = Date.now();
+            updateEspClock();
+        }
+    } catch { /* ignore — older firmware without /api/time */ }
+}
+
+function currentEspEpoch() {
+    if (!espEpochAtFetch) return 0;
+    return espEpochAtFetch + Math.floor((Date.now() - localMsAtFetch) / 1000);
+}
+
+function updateEspClock() {
+    if (!$espClock) return;
+    const epoch = currentEspEpoch();
+    if (!epoch || epoch < 1000000000) {
+        $espClock.textContent = '';
+        $espClock.title = '';
+        return;
+    }
+    const d = new Date(epoch * 1000);
+    const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    $espClock.innerHTML = `<span class="esp-clock-label">Time</span>${timeStr}`;
+    $espClock.title = 'ESP32 time: ' + d.toLocaleString();
+}
+
+// ── Battery indicator ─────────────────────────────────────────────────────────
+function updateBatteryIndicator() {
+    if (!$batteryIndicator) return;
+    const pct = status.batteryPct;
+    if (pct == null) {
+        $batteryIndicator.classList.add('hidden');
+        return;
+    }
+    const level = pct > 50 ? 'high' : pct > 20 ? 'medium' : 'low';
+    $batteryIndicator.classList.remove('hidden');
+    $batteryIndicator.title = `Battery: ${pct}%`;
+    $batteryIndicator.innerHTML = `
+        <div class="battery-bar"><div class="battery-fill ${level}" style="width:${pct}%"></div></div>
+        <span>${pct}%</span>`;
+}
+
+// ── Setup screen (first run) ──────────────────────────────────────────────────
+function renderSetup() {
+    $main.innerHTML = `
+      <div class="settings-section" style="max-width:420px;margin:2rem auto">
+        <h3>Connect to your ESP32</h3>
+        <p class="settings-hint">Enter the URL and API key for your sprinkler controller.</p>
+        <div class="form-group">
+          <label>ESP32 URL</label>
+          <input id="su-url" type="text" value="http://esp-sprinkler.local" />
+        </div>
+        <div class="form-group">
+          <label>Name (optional)</label>
+          <input id="su-name" type="text" placeholder="Backyard" />
+        </div>
+        <div class="form-group">
+          <label>API Key</label>
+          <input id="su-key" type="text" placeholder="your-api-key" autocomplete="off" spellcheck="false"
+                 style="font-family:monospace" value="${esc(getApiKey())}" />
+        </div>
+        <button id="su-save" class="btn btn-primary" style="width:100%">Connect</button>
+      </div>`;
+
+    document.getElementById('su-save').addEventListener('click', async () => {
+        const url = document.getElementById('su-url').value.trim().replace(/\/$/, '');
+        const name = document.getElementById('su-name').value.trim();
+        const key = document.getElementById('su-key').value.trim();
+        if (!url) return toast('URL is required', 'error');
+        setApiKey(key);
+        saveEsp({ url, name: name || 'Sprinkler' });
+        esp = getEsp();
+        toast('Connecting...', '');
+        await loadData();
+        startPolling();
+    });
+}
+
+// ── Status badge helper ─────────────────────────────────────────────────────
+function getStatusBadge() {
+    if (status.online) {
+        if ((status.uptimeSec ?? 9999) < 15) {
+            return { cls: 'warming', text: '\u25d4 Warming Up' };
+        }
+        return { cls: 'online', text: '\u25cf Online' };
+    }
+    // Offline — but was reachable recently? Likely rebooting.
+    const secSinceContact = lastOnlineAt ? (Date.now() - lastOnlineAt) / 1000 : Infinity;
+    if (secSinceContact < 30) {
+        return { cls: 'warming', text: '\u21bb Reconnecting\u2026' };
+    }
+    return { cls: 'offline', text: '\u25cb Offline' };
+}
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+
+// Patches only the status bar, badge, and All Off button without rebuilding
+// zone cards — preserves any in-progress user edits.
+function patchDashboardStatus() {
+    const badge = $main.querySelector('.status-badge');
+    if (badge) {
+        const { cls, text } = getStatusBadge();
+        badge.className = `status-badge ${cls}`;
+        badge.textContent = text;
+    }
+
+    const btnAllOff = $main.querySelector('.ctrl-header .btn-stop');
+    if (btnAllOff) {
+        btnAllOff.disabled = !status.online || !status.manualRun;
+    }
+
+    // Update per-zone run/stop buttons and active styling
+    $main.querySelectorAll('.zone-card[data-zone]').forEach(card => {
+        const zId = parseInt(card.dataset.zone, 10);
+        const isActive = status.activeZone === zId && status.manualRun;
+        card.classList.toggle('active', isActive);
+        const btnRun = card.querySelector('.btn-run');
+        const btnStop = card.querySelector('.btn-stop');
+        if (btnRun) btnRun.disabled = !status.online || isActive;
+        if (btnStop) btnStop.disabled = !isActive;
+    });
+
+    const bar = $main.querySelector('.ctrl-status-bar');
+    if (bar) {
+        bar.className = `ctrl-status-bar ${status.manualRun ? 'running' : 'idle'}`;
+        if (status.manualRun && status.activeZone) {
+            const zones = config.zones || [];
+            const zone = zones.find(z => z.id === status.activeZone);
+            const zName = zone ? zone.name : `Zone ${status.activeZone}`;
+            let runType = 'manual';
+            if (status.scheduledRun) {
+                const idx = (status.activeScheduleIdx ?? -1) + 1;
+                runType = idx > 0 ? `schedule ${idx}` : 'scheduled';
+            }
+            const end = endsAt || Date.now();
+            bar.innerHTML = `&#x25B6; ${esc(zName)} <em>${runType}</em> &mdash; <span class="countdown" data-ends="${end}">${fmtSec(Math.max(0, Math.round((end - Date.now()) / 1000)))}</span> remaining`;
+        } else {
+            bar.innerHTML = '';
+        }
+    }
+}
+
+function renderDashboard() {
+    renderedConfigVersion = config.configVersion ?? -1;
+    $main.innerHTML = '';
+
+    const zones = config.zones || [];
+    const online = status.online;
+
+    // Header bar: name + status badge + All Off
+    const hdr = document.createElement('div');
+    hdr.className = 'ctrl-header';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'ctrl-name';
+    nameSpan.textContent = esp?.name || 'Sprinkler';
+
+    const { cls, text } = getStatusBadge();
+    const badge = document.createElement('span');
+    badge.className = `status-badge ${cls}`;
+    badge.textContent = text;
+
+    const btnAllOff = document.createElement('button');
+    btnAllOff.className = 'btn btn-stop btn-sm';
+    btnAllOff.textContent = '\u23f9 All Off';
+    btnAllOff.title = 'Stop all zones';
+    btnAllOff.disabled = !online || !status.manualRun;
+    btnAllOff.addEventListener('click', async () => {
+        try {
+            await espFetch('POST', '/api/manual', { zone: 0, on: false });
+            endsAt = 0;
+            toast('All zones stopped', 'success');
+            await loadData();
+        } catch (e) { toast(e.message, 'error'); }
+    });
+
+    hdr.append(nameSpan, badge, btnAllOff);
+    $main.appendChild(hdr);
+
+    // Active status bar
+    const bar = document.createElement('div');
+    bar.className = `ctrl-status-bar ${status.manualRun ? 'running' : 'idle'}`;
+    if (status.manualRun && status.activeZone) {
+        const zone = zones.find(z => z.id === status.activeZone);
+        const zName = zone ? zone.name : `Zone ${status.activeZone}`;
+        let runType = 'manual';
+        if (status.scheduledRun) {
+            const idx = (status.activeScheduleIdx ?? -1) + 1;
+            runType = idx > 0 ? `schedule ${idx}` : 'scheduled';
+        }
+        const end = endsAt || Date.now();
+        bar.innerHTML = `&#x25B6; ${esc(zName)} <em>${runType}</em> &mdash; <span class="countdown" data-ends="${end}">${fmtSec(Math.max(0, Math.round((end - Date.now()) / 1000)))}</span> remaining`;
+    }
+    $main.appendChild(bar);
+
+    // Zone grid
+    if (!zones.length) {
+        const p = document.createElement('p');
+        p.style.cssText = 'color:var(--text-muted);font-size:.85rem;padding:1rem 0';
+        p.textContent = 'No zones configured. Tap \u2699\ufe0f \u2192 Edit Zones to add some.';
+        $main.appendChild(p);
+        return;
+    }
+
+    const grid = document.createElement('div');
+    grid.className = 'zones-grid';
+    zones.forEach(zone => grid.appendChild(buildZoneCard(zone)));
+    $main.appendChild(grid);
+}
+
 // ── Schedule helpers ──────────────────────────────────────────────────────────
 const DAY_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
 function emptySchedule() {
-    return { enabled: false, startTime: '07:00', durationMin: 5, days: [false, false, false, false, false, false, false] };
+    return {
+        enabled: false, startTime: '07:00', durationMin: 5,
+        days: [false, false, false, false, false, false, false]
+    };
 }
 
 function buildScheduleSlot(idx, sched) {
@@ -231,44 +403,32 @@ function buildScheduleSlot(idx, sched) {
     wrap.className = 'schedule-slot';
     wrap.dataset.slot = idx;
 
-    // ── row 1: enabled + label + time + duration
     const row = document.createElement('div');
     row.className = 'sched-row';
 
     const enabledCb = document.createElement('input');
-    enabledCb.type = 'checkbox';
-    enabledCb.className = 'sched-enabled';
-    enabledCb.checked = !!s.enabled;
-    enabledCb.title = 'Enable this schedule';
+    enabledCb.type = 'checkbox'; enabledCb.className = 'sched-enabled';
+    enabledCb.checked = !!s.enabled; enabledCb.title = 'Enable this schedule';
 
     const lbl = document.createElement('span');
     lbl.className = 'sched-label';
     lbl.textContent = `Schedule ${idx + 1}`;
 
     const timeInput = document.createElement('input');
-    timeInput.type = 'time';
-    timeInput.className = 'sched-time';
+    timeInput.type = 'time'; timeInput.className = 'sched-time';
     timeInput.value = s.startTime || '07:00';
 
     const durInput = document.createElement('input');
-    durInput.type = 'number';
-    durInput.className = 'sched-duration';
-    durInput.min = 1;
-    durInput.max = 120;
-    durInput.value = s.durationMin || 5;
+    durInput.type = 'number'; durInput.className = 'sched-duration';
+    durInput.min = 1; durInput.max = 120; durInput.value = s.durationMin || 5;
     durInput.setAttribute('aria-label', 'Duration (minutes)');
 
-    row.appendChild(enabledCb);
-    row.appendChild(lbl);
-    row.appendChild(timeInput);
-    row.appendChild(durInput);
+    row.append(enabledCb, lbl, timeInput, durInput);
     wrap.appendChild(row);
 
-    // ── row 2: day checkboxes
     const daysRow = document.createElement('div');
     daysRow.className = 'days-row';
 
-    // "All" toggle
     const allLbl = document.createElement('label');
     allLbl.className = 'day-cb day-cb-all';
     const allCb = document.createElement('input');
@@ -278,36 +438,26 @@ function buildScheduleSlot(idx, sched) {
     allCb.title = 'Toggle all days';
     const allSpan = document.createElement('span');
     allSpan.textContent = 'All';
-    allLbl.appendChild(allCb);
-    allLbl.appendChild(allSpan);
+    allLbl.append(allCb, allSpan);
     daysRow.appendChild(allLbl);
 
     const dayCbs = [];
     DAY_LABELS.forEach((d, di) => {
-        const dayLbl = document.createElement('label');
-        dayLbl.className = 'day-cb';
+        const lbl2 = document.createElement('label');
+        lbl2.className = 'day-cb';
         const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.checked = !!days[di];
-        cb.dataset.day = di;
-        const span = document.createElement('span');
-        span.textContent = d;
-        dayLbl.appendChild(cb);
-        dayLbl.appendChild(span);
-        daysRow.appendChild(dayLbl);
+        cb.type = 'checkbox'; cb.checked = !!days[di]; cb.dataset.day = di;
+        const sp = document.createElement('span');
+        sp.textContent = d;
+        lbl2.append(cb, sp);
+        daysRow.appendChild(lbl2);
         dayCbs.push(cb);
     });
 
-    // All checkbox logic
-    allCb.addEventListener('change', () => {
-        dayCbs.forEach(cb => { cb.checked = allCb.checked; });
-    });
-    dayCbs.forEach(cb => cb.addEventListener('change', () => {
-        allCb.checked = dayCbs.every(c => c.checked);
-    }));
+    allCb.addEventListener('change', () => dayCbs.forEach(cb => { cb.checked = allCb.checked; }));
+    dayCbs.forEach(cb => cb.addEventListener('change', () => { allCb.checked = dayCbs.every(c => c.checked); }));
 
     wrap.appendChild(daysRow);
-
     return wrap;
 }
 
@@ -322,71 +472,57 @@ function readScheduleSlot(zCard, idx) {
     };
 }
 
-async function saveZoneSchedule(ctrl, zoneId, schedules) {
-    const zones = (ctrl.config?.zones || []).map(z => z.id === zoneId ? { ...z, schedules } : z);
-    await PUT(`/api/controllers/${ctrl.id}/config`, { ...ctrl.config, zones });
-}
-
 // ── Zone card ─────────────────────────────────────────────────────────────────
-function buildZoneCard(ctrl, zone, status) {
+function buildZoneCard(zone) {
     const isActive = status.activeZone === zone.id && status.manualRun;
     const online = status.online;
     const schedules = zone.schedules || [emptySchedule(), emptySchedule()];
 
     const zCard = document.createElement('div');
     zCard.className = `zone-card ${isActive ? 'active' : ''}`;
+    zCard.dataset.zone = zone.id;
 
-    // ── Header: name + run controls
     const header = document.createElement('div');
     header.className = 'zone-header';
 
-    const name = document.createElement('div');
-    name.className = 'zone-name';
-    name.textContent = zone.name || `Zone ${zone.id}`;
-    header.appendChild(name);
+    const nameEl = document.createElement('div');
+    nameEl.className = 'zone-name';
+    nameEl.textContent = zone.name || `Zone ${zone.id}`;
+    header.appendChild(nameEl);
 
     const controls = document.createElement('div');
     controls.className = 'zone-controls';
 
     const sel = document.createElement('input');
-    sel.type = 'number';
-    sel.className = 'duration-select';
-    sel.min = 1;
-    sel.max = 120;
-    sel.value = getLastDuration(ctrl.id, zone.id);
+    sel.type = 'number'; sel.className = 'duration-select';
+    sel.min = 1; sel.max = 120; sel.value = getLastDuration(zone.id);
     sel.setAttribute('aria-label', 'Duration (minutes)');
     controls.appendChild(sel);
 
     const btnRun = document.createElement('button');
     btnRun.className = 'btn btn-run btn-sm';
-    btnRun.textContent = '▶';
-    btnRun.title = `Run zone ${zone.id}`;
+    btnRun.textContent = '\u25b6'; btnRun.title = `Run zone ${zone.id}`;
     btnRun.disabled = !online || isActive;
     btnRun.addEventListener('click', () => {
         const mins = parseInt(sel.value, 10);
-        setLastDuration(ctrl.id, zone.id, mins);
-        handleManual(ctrl.id, zone.id, true, mins);
+        setLastDuration(zone.id, mins);
+        handleManual(zone.id, true, mins);
     });
     controls.appendChild(btnRun);
 
     const btnStop = document.createElement('button');
     btnStop.className = 'btn btn-stop btn-sm';
-    btnStop.textContent = '⏹';
-    btnStop.title = 'Stop';
+    btnStop.textContent = '\u23f9'; btnStop.title = 'Stop';
     btnStop.disabled = !isActive;
-    btnStop.addEventListener('click', () => handleManual(ctrl.id, zone.id, false));
+    btnStop.addEventListener('click', () => handleManual(zone.id, false));
     controls.appendChild(btnStop);
 
     header.appendChild(controls);
     zCard.appendChild(header);
 
-    // ── Schedule slots
-    const slot0 = buildScheduleSlot(0, schedules[0]);
-    const slot1 = buildScheduleSlot(1, schedules[1]);
-    zCard.appendChild(slot0);
-    zCard.appendChild(slot1);
+    zCard.appendChild(buildScheduleSlot(0, schedules[0]));
+    zCard.appendChild(buildScheduleSlot(1, schedules[1]));
 
-    // ── Auto-save schedules on any change (debounced)
     const schedArea = document.createElement('div');
     schedArea.className = 'zone-sched-area';
     const saveStatus = document.createElement('span');
@@ -395,12 +531,16 @@ function buildZoneCard(ctrl, zone, status) {
     zCard.appendChild(schedArea);
 
     const doSave = debounce(async () => {
-        saveStatus.textContent = 'Saving…';
+        saveStatus.textContent = 'Saving...';
         saveStatus.className = 'sched-save-status saving';
         const newSchedules = [readScheduleSlot(zCard, 0), readScheduleSlot(zCard, 1)];
+        const updatedZones = (config.zones || []).map(z =>
+            z.id === zone.id ? { ...z, schedules: newSchedules } : z
+        );
         try {
-            await saveZoneSchedule(ctrl, zone.id, newSchedules);
-            saveStatus.textContent = 'Saved ✓';
+            await espFetch('POST', '/api/config', { ...config, zones: updatedZones });
+            config.zones = updatedZones;
+            saveStatus.textContent = 'Saved \u2713';
             saveStatus.className = 'sched-save-status saved';
             setTimeout(() => { saveStatus.textContent = ''; saveStatus.className = 'sched-save-status'; }, 2000);
         } catch {
@@ -409,31 +549,32 @@ function buildZoneCard(ctrl, zone, status) {
         }
     }, 1200);
 
-    zCard.addEventListener('change', e => {
-        if (e.target.closest('.schedule-slot')) doSave();
-    });
-    zCard.addEventListener('input', e => {
-        if (e.target.closest('.schedule-slot')) doSave();
-    });
+    zCard.addEventListener('change', e => { if (e.target.closest('.schedule-slot')) doSave(); });
+    zCard.addEventListener('input', e => { if (e.target.closest('.schedule-slot')) doSave(); });
 
     return zCard;
 }
 
-// ── Actions ───────────────────────────────────────────────────────────────────
-async function handleManual(ctrlId, zoneId, on, durationMin) {
+// ── Manual run/stop ───────────────────────────────────────────────────────────
+async function handleManual(zoneId, on, durationMin) {
+    // Pause polling so an in-flight poll can't race and clear endsAt mid-request
+    clearInterval(pollTimer);
     try {
-        if (on) {
-            countdownEnds.set(ctrlId, Date.now() + (durationMin || 0) * 60 * 1000);
-        } else {
-            countdownEnds.delete(ctrlId);
+        endsAt = on ? Date.now() + (durationMin || 0) * 60 * 1000 : 0;
+        const result = await espFetch('POST', '/api/manual', { zone: zoneId, on, durationMin });
+        // Prefer ESP's confirmed remainingSec over our pre-calculated estimate
+        if (on && result.manualRun && result.remainingSec) {
+            endsAt = Date.now() + result.remainingSec * 1000;
+        } else if (!result.manualRun) {
+            endsAt = 0;
         }
-        await POST(`/api/controllers/${ctrlId}/manual`, { zone: zoneId, on, durationMin });
         toast(on ? `Zone ${zoneId} started` : `Zone ${zoneId} stopped`, 'success');
-        await loadControllers();
+        await loadData();
     } catch (e) {
-        if (on) countdownEnds.delete(ctrlId); // roll back on failure
+        endsAt = 0;
         toast(`Error: ${e.message}`, 'error');
     }
+    startPolling(); // always restart polling
 }
 
 // ── Settings view ─────────────────────────────────────────────────────────────
@@ -441,141 +582,81 @@ function renderSettings() {
     activeView = 'settings';
     $main.innerHTML = '';
 
-    // ── API key section
-    const keySection = document.createElement('div');
-    keySection.className = 'settings-section';
-    keySection.innerHTML = `
-      <h3>API Key</h3>
-      <div class="form-group" style="flex-direction:row;align-items:center;gap:.5rem">
-        <input id="f-apikey" type="text" placeholder="Paste your API key" autocomplete="off" spellcheck="false"
-               value="${esc(getApiKey())}"
-               style="flex:1;font-family:monospace" />
-        <button id="btn-save-key" class="btn btn-primary btn-sm">Save</button>
-      </div>`;
-    $main.appendChild(keySection);
-    document.getElementById('btn-save-key').addEventListener('click', () => {
-        const val = document.getElementById('f-apikey').value.trim();
-        setApiKey(val);
-        toast('API key saved', 'success');
+    const connSection = document.createElement('div');
+    connSection.className = 'settings-section';
+    connSection.innerHTML = `
+      <h3>ESP32 Connection</h3>
+      <div class="form-group">
+        <label>Name</label>
+        <input id="f-name" value="${esc(esp?.name || '')}" placeholder="Backyard" />
+      </div>
+      <div class="form-group">
+        <label>URL</label>
+        <input id="f-url" value="${esc(esp?.url || '')}" placeholder="http://esp-sprinkler.local" />
+      </div>
+      <div class="form-group">
+        <label>API Key</label>
+        <input id="f-apikey" type="text" autocomplete="off" spellcheck="false"
+               style="font-family:monospace" value="${esc(getApiKey())}" />
+      </div>
+      <button id="btn-save-conn" class="btn btn-primary btn-sm">Save</button>`;
+    $main.appendChild(connSection);
+
+    document.getElementById('btn-save-conn').addEventListener('click', () => {
+        const url = document.getElementById('f-url').value.trim().replace(/\/$/, '');
+        const name = document.getElementById('f-name').value.trim();
+        const key = document.getElementById('f-apikey').value.trim();
+        if (!url) return toast('URL is required', 'error');
+        setApiKey(key);
+        saveEsp({ url, name: name || 'Sprinkler' });
+        esp = getEsp();
+        toast('Settings saved', 'success');
     });
 
-    // ── Watchdog section
-    const wdSection = document.createElement('div');
-    wdSection.className = 'settings-section';
-    const maxMin = appSettings.maxZoneMinutes ?? 30;
-    wdSection.innerHTML = `
-      <h3>Watchdog</h3>
-      <p class="settings-hint">Independent safety timer. If a zone runs longer than this limit the server
-        will force it off, even if the app is closed.</p>
-      <div class="form-group" style="flex-direction:row;align-items:center;gap:.5rem">
-        <label style="white-space:nowrap">Max zone runtime</label>
-        <input id="f-max-min" type="number" min="0" step="1" value="${maxMin}"
-               style="width:5rem" />
-        <span style="color:var(--text-muted);font-size:.85rem">minutes &nbsp;(0 = disabled)</span>
-        <button id="btn-save-wd" class="btn btn-primary btn-sm" style="margin-left:auto">Save</button>
-      </div>`;
-    $main.appendChild(wdSection);
-    document.getElementById('btn-save-wd').addEventListener('click', async () => {
-        const val = parseInt(document.getElementById('f-max-min').value, 10);
-        if (!Number.isFinite(val) || val < 0) return toast('Enter a valid number (0 to disable)', 'error');
+    const zonesSection = document.createElement('div');
+    zonesSection.className = 'settings-section';
+    const zh3 = document.createElement('h3');
+    zh3.textContent = 'Zones';
+    zonesSection.appendChild(zh3);
+    const btnZones = document.createElement('button');
+    btnZones.className = 'btn btn-primary btn-sm';
+    btnZones.textContent = '🌿 Edit Zones';
+    btnZones.addEventListener('click', openEditZones);
+    zonesSection.appendChild(btnZones);
+    $main.appendChild(zonesSection);
+
+    // ── Debug section ──────────────────────────────────────────────────────
+    const dbgSection = document.createElement('div');
+    dbgSection.className = 'settings-section';
+    const dbgH3 = document.createElement('h3');
+    dbgH3.textContent = 'Debug';
+    dbgSection.appendChild(dbgH3);
+
+    const dbgPre = document.createElement('pre');
+    dbgPre.id = 'debug-output';
+    dbgPre.style.cssText = 'font-size:.72rem;background:#1e1e1e;color:#d4d4d4;border-radius:8px;padding:.75rem 1rem;overflow-x:auto;max-height:360px;overflow-y:auto;white-space:pre-wrap;word-break:break-all';
+    dbgPre.textContent = 'Press "Fetch Debug" to load…';
+    dbgSection.appendChild(dbgPre);
+
+    const btnDbg = document.createElement('button');
+    btnDbg.className = 'btn btn-ghost btn-sm';
+    btnDbg.style.marginTop = '.5rem';
+    btnDbg.textContent = '🔍 Fetch Debug';
+    btnDbg.addEventListener('click', async () => {
+        btnDbg.disabled = true;
+        btnDbg.textContent = 'Loading…';
         try {
-            appSettings = await PUT('/api/settings', { maxZoneMinutes: val });
-            toast(val === 0 ? 'Watchdog disabled' : `Watchdog set to ${val} min`, 'success');
-        } catch (e) { toast(e.message, 'error'); }
+            const d = await espFetch('GET', '/api/debug');
+            dbgPre.textContent = JSON.stringify(d, null, 2);
+        } catch (e) {
+            dbgPre.textContent = 'Error: ' + e.message;
+        }
+        btnDbg.disabled = false;
+        btnDbg.textContent = '🔍 Fetch Debug';
     });
-
-    // ── Email report section
-    const emailSection = document.createElement('div');
-    emailSection.className = 'settings-section';
-    emailSection.innerHTML = `
-      <h3>Daily Email Report</h3>
-      <p class="settings-hint">Sends a summary of all zones that ran at 11:59 pm each day using your Gmail account.
-        Gmail requires an <strong>App Password</strong> — enable 2-Step Verification on your Google account then
-        create an App Password at <a href="https://myaccount.google.com/apppasswords" target="_blank">myaccount.google.com/apppasswords</a>.</p>
-      <div class="form-group" style="flex-direction:row;align-items:center;gap:.5rem;margin-bottom:.9rem">
-        <label style="white-space:nowrap;margin-bottom:0">Enable</label>
-        <input id="f-email-enabled" type="checkbox" style="width:1.58rem;height:1.58rem;accent-color:var(--blue);cursor:pointer;flex-shrink:0"
-               ${appSettings.emailEnabled ? 'checked' : ''} />
-      </div>
-      <div class="form-group">
-        <label>Send report to</label>
-        <input id="f-email-to" type="email" placeholder="you@example.com" value="${esc(appSettings.emailTo || '')}" />
-      </div>
-      <div class="form-group">
-        <label>Gmail address (sender)</label>
-        <input id="f-email-user" type="email" placeholder="yourname@gmail.com" value="${esc(appSettings.emailUser || '')}" />
-      </div>
-      <div class="form-group">
-        <label>Gmail App Password</label>
-        <input id="f-email-pass" type="password" placeholder="xxxx xxxx xxxx xxxx" autocomplete="new-password"
-               value="${esc(appSettings.emailPass || '')}" />
-      </div>
-      <button id="btn-save-email" class="btn btn-primary btn-sm">Save Email Settings</button>`;
-    $main.appendChild(emailSection);
-    document.getElementById('btn-save-email').addEventListener('click', async () => {
-        const patch = {
-            emailEnabled: document.getElementById('f-email-enabled').checked,
-            emailTo: document.getElementById('f-email-to').value.trim(),
-            emailUser: document.getElementById('f-email-user').value.trim(),
-            emailPass: document.getElementById('f-email-pass').value,
-        };
-        try {
-            appSettings = await PUT('/api/settings', patch);
-            toast('Email settings saved', 'success');
-        } catch (e) { toast(e.message, 'error'); }
-    });
-
-    const section = document.createElement('div');
-    section.className = 'settings-section';
-    const h3 = document.createElement('h3');
-    h3.textContent = 'Controllers';
-    section.appendChild(h3);
-
-    controllers.forEach(ctrl => {
-        const row = document.createElement('div');
-        row.className = 'ctrl-list-item';
-        row.innerHTML = `
-      <div>
-        <div class="item-info">${esc(ctrl.name)}</div>
-        <div class="item-url">${esc(ctrl.espUrl)}</div>
-      </div>`;
-        const actions = document.createElement('div');
-        actions.style.display = 'flex';
-        actions.style.gap = '.4rem';
-
-        const btnEdit = document.createElement('button');
-        btnEdit.className = 'btn btn-ghost btn-sm';
-        btnEdit.textContent = '✏️ Edit';
-        btnEdit.addEventListener('click', () => openEditController(ctrl));
-        actions.appendChild(btnEdit);
-
-        const btnZones = document.createElement('button');
-        btnZones.className = 'btn btn-primary btn-sm';
-        btnZones.textContent = '🌿 Zones';
-        btnZones.addEventListener('click', () => openEditZones(ctrl));
-        actions.appendChild(btnZones);
-
-        const btnDel = document.createElement('button');
-        btnDel.className = 'btn btn-danger btn-sm';
-        btnDel.textContent = '🗑';
-        btnDel.addEventListener('click', () => handleDeleteController(ctrl.id));
-        actions.appendChild(btnDel);
-
-        row.appendChild(actions);
-        section.appendChild(row);
-    });
-
-    const btnAdd = document.createElement('button');
-    btnAdd.className = 'btn btn-primary';
-    btnAdd.style.marginTop = '.5rem';
-    btnAdd.textContent = '+ Add Controller';
-    btnAdd.addEventListener('click', openAddController);
-    section.appendChild(btnAdd);
-
-    $main.appendChild(section);
+    dbgSection.appendChild(btnDbg);
+    $main.appendChild(dbgSection);
 }
-
-// ── Modal helpers ─────────────────────────────────────────────────────────────
 let _modalResolve = null;
 
 function openModal(title, bodyHtml) {
@@ -593,10 +674,6 @@ function closeModal(value) {
 $modalOk.addEventListener('click', () => closeModal(true));
 $modalCx.addEventListener('click', () => closeModal(false));
 
-/**
- * Lightweight confirm overlay — independent of the main modal so it can be
- * used inside the zone editor without clobbering _modalResolve.
- */
 function confirmDialog(message) {
     return new Promise(resolve => {
         const overlay = document.createElement('div');
@@ -619,86 +696,32 @@ function confirmDialog(message) {
     });
 }
 
-// ── Add controller ────────────────────────────────────────────────────────────
-function openAddController() {
-    openModal('Add Controller', `
-    <div class="form-group"><label>ID (slug, eg: backyard)</label>
-      <input id="f-id" placeholder="backyard" /></div>
-    <div class="form-group"><label>Name</label>
-      <input id="f-name" placeholder="Backyard" /></div>
-    <div class="form-group"><label>ESP32 URL</label>
-      <input id="f-url" placeholder="http://192.168.1.50" /></div>
-  `).then(async ok => {
-        if (!ok) return;
-        const id = document.getElementById('f-id')?.value.trim();
-        const name = document.getElementById('f-name')?.value.trim();
-        const url = document.getElementById('f-url')?.value.trim();
-        if (!id || !url) return toast('ID and URL are required', 'error');
-        try {
-            await POST('/api/controllers', { id, name: name || id, espUrl: url });
-            toast('Controller added', 'success');
-            await loadControllers();
-            renderSettings();
-        } catch (e) { toast(e.message, 'error'); }
-    });
-}
-
-// ── Edit controller ───────────────────────────────────────────────────────────
-function openEditController(ctrl) {
-    openModal(`Edit: ${ctrl.name}`, `
-    <div class="form-group"><label>Name</label>
-      <input id="f-name" value="${esc(ctrl.name)}" /></div>
-    <div class="form-group"><label>ESP32 URL</label>
-      <input id="f-url" value="${esc(ctrl.espUrl)}" /></div>
-  `).then(async ok => {
-        if (!ok) return;
-        const name = document.getElementById('f-name')?.value.trim();
-        const url = document.getElementById('f-url')?.value.trim();
-        try {
-            await PUT(`/api/controllers/${ctrl.id}`, { name, espUrl: url });
-            toast('Saved', 'success');
-            await loadControllers();
-            renderSettings();
-        } catch (e) { toast(e.message, 'error'); }
-    });
-}
-
-// ── Delete controller ─────────────────────────────────────────────────────────
-async function handleDeleteController(id) {
-    if (!await confirmDialog(`Delete controller "${id}"?`)) return;
-    try {
-        await DELETE(`/api/controllers/${id}`);
-        toast('Deleted', 'success');
-        await loadControllers();
-        renderSettings();
-    } catch (e) { toast(e.message, 'error'); }
-}
-
-// ── Zone editor ───────────────────────────────────────────────────────────────
-function openEditZones(ctrl) {
-    const zones = (ctrl.config?.zones || []).map(z => ({ ...z }));
+function openEditZones() {
+    const zones = (config.zones || []).map(z => ({ ...z }));
 
     function buildZoneRows() {
         return zones.map((z, i) => `
-      <div class="zone-row" data-i="${i}">
-        <input type="number" class="z-id" value="${z.id}" min="1" max="16"
-               style="width:52px" placeholder="ID" title="Zone number (relay index)" />
-        <input type="text" class="z-name" value="${esc(z.name)}" placeholder="Zone name" />
-        <button type="button" class="btn btn-danger btn-sm z-del">✕</button>
-      </div>`).join('');
+          <div class="zone-row" data-i="${i}">
+            <input type="number" class="z-id" value="${z.id}" min="1" max="8"
+                   style="width:52px" placeholder="ID" title="Zone number (relay index)" />
+            <input type="text" class="z-name" value="${esc(z.name)}" placeholder="Zone name" />
+            <button type="button" class="btn btn-danger btn-sm z-del">\u2715</button>
+          </div>`).join('');
     }
 
-    $modalTitle.textContent = `Zones: ${ctrl.name}`;
+    $modalTitle.textContent = 'Edit Zones';
     $modalBody.innerHTML = `
-    <div id="zone-rows">${buildZoneRows()}</div>
-    <button type="button" id="btn-add-zone" class="btn btn-ghost btn-sm" style="margin-top:.4rem">
-      + Add zone
-    </button>`;
+      <div id="zone-rows">${buildZoneRows()}</div>
+      <button type="button" id="btn-add-zone" class="btn btn-ghost btn-sm" style="margin-top:.4rem">
+        + Add zone
+      </button>`;
     $backdrop.classList.remove('hidden');
 
-    function syncZoneRows() {
+    function syncRows() {
         document.querySelectorAll('#zone-rows .zone-row').forEach((row, i) => {
+            const existing = zones[i] || {};
             zones[i] = {
+                ...existing,
                 id: parseInt(row.querySelector('.z-id').value, 10) || i + 1,
                 name: row.querySelector('.z-name').value.trim() || `Zone ${i + 1}`,
             };
@@ -706,70 +729,60 @@ function openEditZones(ctrl) {
     }
 
     $modalBody.addEventListener('click', async e => {
-        if (e.target.classList.contains('z-del')) {
-            const row = e.target.closest('[data-i]');
-            const zoneName = row.querySelector('.z-name').value.trim() || `Zone ${parseInt(row.dataset.i, 10) + 1}`;
-            if (!await confirmDialog(`Remove zone "${zoneName}"?`)) return;
-            const i = parseInt(row.dataset.i, 10);
-            syncZoneRows();
-            zones.splice(i, 1);
-            document.getElementById('zone-rows').innerHTML = buildZoneRows();
-        }
+        if (!e.target.classList.contains('z-del')) return;
+        const row = e.target.closest('[data-i]');
+        const zName = row.querySelector('.z-name').value.trim() || `Zone ${parseInt(row.dataset.i, 10) + 1}`;
+        if (!await confirmDialog(`Remove zone "${zName}"?`)) return;
+        syncRows();
+        zones.splice(parseInt(row.dataset.i, 10), 1);
+        document.getElementById('zone-rows').innerHTML = buildZoneRows();
     });
 
     document.getElementById('btn-add-zone').addEventListener('click', () => {
-        syncZoneRows();
+        syncRows();
         zones.push({ id: zones.length + 1, name: `Zone ${zones.length + 1}` });
         document.getElementById('zone-rows').innerHTML = buildZoneRows();
     });
 
     return new Promise(res => { _modalResolve = res; }).then(async ok => {
         if (!ok) return;
-        syncZoneRows();
+        syncRows();
         try {
-            const result = await PUT(`/api/controllers/${ctrl.id}/config`, {
-                ...ctrl.config,
-                zones,
-            });
-            if (result.pushed) {
-                toast('Config saved & pushed to ESP ✓', 'success');
-            } else {
-                toast('Config saved — ESP offline, will push when back online', 'error');
-            }
-            await loadControllers();
-            renderSettings();
+            const result = await espFetch('POST', '/api/config', { ...config, zones });
+            config.zones = zones;
+            toast(`Zones saved (v${result.configVersion}) \u2713`, 'success');
         } catch (e) { toast(e.message, 'error'); }
     });
 }
 
 // ── Navigation ────────────────────────────────────────────────────────────────
+function goToDashboard() {
+    activeView = 'dashboard';
+    $btnSettings.textContent = '\u2699\ufe0f';
+    $btnSettings.title = 'Settings';
+    $appTitle.style.cursor = '';
+    loadData();
+    startPolling();
+}
+
+$appTitle.addEventListener('click', () => {
+    if (activeView === 'settings') goToDashboard();
+});
+
 $btnSettings.addEventListener('click', () => {
     if (activeView === 'settings') {
-        activeView = 'dashboard';
-        $btnSettings.title = 'Settings';
-        clearInterval(pollTimer);
-        loadControllers();
-        startPolling();
+        goToDashboard();
     } else {
         clearInterval(pollTimer);
         activeView = 'settings';
+        $btnSettings.textContent = '🏠';
         $btnSettings.title = 'Dashboard';
-        Promise.all([loadControllers(), loadAppSettings()]).then(() => renderSettings());
+        $appTitle.style.cursor = 'pointer';
+        renderSettings();
     }
-    $btnSettings.textContent = activeView === 'settings' ? '🏠' : '⚙️';
 });
 
-// ── Tiny HTML escape ──────────────────────────────────────────────────────────
-function esc(s) {
-    return String(s ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-}
-
 // ── Boot ──────────────────────────────────────────────────────────────────────
-loadAppSettings();
-loadControllers();
+loadData();
 startPolling();
 startCountdown();

@@ -1,0 +1,33 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "ESP32: Upload + Monitor",
+			"type": "shell",
+			"command": "powershell",
+			"args": ["-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}\\upload.ps1"],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": [],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		},
+		{
+			"label": "ESP32: Monitor Only",
+			"type": "shell",
+			"command": "C:\\Users\\gregs\\.platformio\\penv\\Scripts\\python.exe",
+			"args": ["-m", "platformio", "device", "monitor", "-d", "${workspaceFolder}\\esp32", "-b", "115200"],
+			"options": {
+				"cwd": "${workspaceFolder}",
+				"shell": {
+					"executable": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+					"args": ["-NoProfile", "-Command"]
+				}
+			},
+			"problemMatcher": []
+		}
+	]
+}

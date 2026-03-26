@@ -1,0 +1,12 @@
+{
+	"domain": "sprinkler_nas",
+	"name": "Sprinkler NAS",
+	"version": "1.0.0",
+	"codeowners": [],
+	"dependencies": [],
+	"documentation": "",
+	"integration_type": "hub",
+	"iot_class": "local_polling",
+	"requirements": [],
+	"zeroconf": [{ "type": "_sprinklerapi._tcp.local." }]
+}

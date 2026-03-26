@@ -1,0 +1,15 @@
+{
+	"configurations": [
+		{
+			"name": "PlatformIO",
+			"includePath": ["${workspaceFolder}/esp32/include", "${workspaceFolder}/esp32/src", "C:/Users/gregs/.platformio/packages/framework-arduinoespressif32/cores/esp32", "C:/Users/gregs/.platformio/packages/framework-arduinoespressif32/variants/esp32c3", "C:/Users/gregs/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src", "C:/Users/gregs/.platformio/packages/framework-arduinoespressif32/libraries/WebServer/src", "C:/Users/gregs/.platformio/packages/framework-arduinoespressif32/libraries/ESPmDNS/src", "C:/Users/gregs/.platformio/packages/framework-arduinoespressif32/libraries/HTTPClient/src", "C:/Users/gregs/.platformio/packages/framework-arduinoespressif32/libraries/Network/src", "C:/Users/gregs/.platformio/packages/framework-arduinoespressif32/libraries/FS/src", "C:/Users/gregs/www/sprinkler/esp32/.pio/libdeps/esp32dev/ArduinoJson/src", "C:/Users/gregs/.platformio/packages/framework-arduinoespressif32-libs/esp32c3/include/**", "C:/Users/gregs/.platformio/packages/toolchain-riscv32-esp/riscv32-esp-elf/include/**"],
+			"defines": ["ARDUINO_ARCH_ESP32", "ARDUINO=10812", "ARDUINO_ESP32C3_DEV", "ESP32=ESP32", "ESP_PLATFORM", "F_CPU=160000000L", "CORE_DEBUG_LEVEL=1"],
+			"compilerPath": "C:/Users/gregs/.platformio/packages/toolchain-riscv32-esp/bin/riscv32-esp-elf-gcc.exe",
+			"compilerArgs": ["-march=rv32imc_zicsr_zifencei"],
+			"cStandard": "gnu17",
+			"cppStandard": "gnu++17",
+			"intelliSenseMode": "gcc-arm"
+		}
+	],
+	"version": 4
+}

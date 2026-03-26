@@ -1,0 +1,38 @@
+{
+	"config": {
+		"step": {
+			"user": {
+				"title": "Connect to Sprinkler ESP32",
+				"description": "Enter the URL and API key for your ESP32 controller.",
+				"data": {
+					"url": "ESP32 URL (e.g. http://esp-sprinkler.local)",
+					"api_key": "API Key"
+				}
+			},
+			"zeroconf_confirm": {
+				"title": "Sprinkler ESP32 discovered",
+				"description": "Found **{name}** at {url}. Enter your API key to confirm.",
+				"data": {
+					"api_key": "API Key"
+				}
+			}
+		},
+		"error": {
+			"cannot_connect": "Could not connect — check the URL and API key.",
+			"unknown": "Unexpected error — check the logs."
+		},
+		"abort": {
+			"already_configured": "This controller is already configured."
+		}
+	},
+	"options": {
+		"step": {
+			"init": {
+				"title": "Sprinkler options",
+				"data": {
+					"default_duration_min": "Default zone run time (minutes)"
+				}
+			}
+		}
+	}
+}
