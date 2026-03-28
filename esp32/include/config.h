@@ -6,16 +6,27 @@
 
 // ── Relay board ───────────────────────────────────────────────────────────────
 // Number of zones / relays
-#define MAX_ZONES 8
+#define MAX_ZONES 4
 
 // GPIO pins — index 0 = zone 1
-// ESP32-C3 safe output pins (avoids flash 11-17, USB 18-19)
-// Wired to LEDs for testing — swap for relay pins when hardware arrives
-constexpr int RELAY_PINS[MAX_ZONES] = { 2, 3, 4, 5, 6, 7, 8, 10 };
+// IMPORTANT: GPIO4-7 are JTAG pins (MTMS/MTDI/MTCK/MTDO) — the bootloader
+// drives them LOW which fires active-LOW relays on boot. Use non-JTAG pins:
+//   GPIO3  (D1)  — safe, no boot function
+//   GPIO10 (D10) — safe, no boot function
+//   GPIO20 (D7)  — safe, UART0 RX but USB-CDC is used instead
+//   GPIO21 (D6)  — safe, UART0 TX but USB-CDC is used instead
+constexpr int RELAY_PINS[MAX_ZONES] = { 3, 10, 20, 21 };
 
 // true  = relay activates on LOW  (most common opto-isolated boards)
-// false = relay activates on HIGH (LEDs: HIGH = on)
+// false = relay activates on HIGH
 #define RELAY_ACTIVE_LOW false
+
+// ── Status LED ───────────────────────────────────────────────────────────────
+// Single LED that lights whenever any zone is active.
+// GPIO2 = onboard LED on XIAO ESP32-C3 (active LOW: LOW = on).
+// Set to -1 to disable.
+#define STATUS_LED_PIN       2
+#define STATUS_LED_ACTIVE_LOW true
 
 // ── Network ───────────────────────────────────────────────────────────────────
 // mDNS hostname — device will be reachable at <HOSTNAME>.local

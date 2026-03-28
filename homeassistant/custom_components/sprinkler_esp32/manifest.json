@@ -1,6 +1,6 @@
 {
-	"domain": "sprinkler_nas",
-	"name": "Sprinkler NAS",
+	"domain": "sprinkler_esp32",
+	"name": "Sprinkler ESP32",
 	"version": "1.0.0",
 	"codeowners": [],
 	"dependencies": [],

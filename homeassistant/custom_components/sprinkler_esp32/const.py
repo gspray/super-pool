@@ -1,6 +1,6 @@
-"""Constants for the Sprinkler NAS integration."""
+"""Constants for the Sprinkler ESP32 integration."""
 
-DOMAIN = "sprinkler_nas"
+DOMAIN = "sprinkler_esp32"
 
 CONF_URL     = "url"
 CONF_API_KEY = "api_key"

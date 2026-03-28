@@ -11,28 +11,41 @@
     mDNS service  _sprinklerapi._tcp.local
     TXT records   id=<CONTROLLER_ID>  api=1  model=SprayCtrl
 
-  Security:  every request must carry  x-api-key: <API_KEY>  (see secrets.h)
-  Safety:    self-contained timer shuts the zone off regardless of network state
+  Security:
+    Full key (API_KEY)   — read + write everything (owner)
+    Guest key (GUEST_KEY)— read + manual only, no config changes (landscaper)
+    Both keys are checked via x-api-key header.
+
+  Networking:
+    STA mode  — joins your home WiFi (owner access via LAN / Home Assistant)
+    AP mode   — broadcasts AP_SSID / AP_PASS hotspot (landscaper QR access)
+    Both run simultaneously (WIFI_AP_STA). AP IP is always 192.168.4.1.
+    Captive portal: DNS wildcards all domains to 192.168.4.1 — phones auto-
+    popup "Sign in to network" when joining the hotspot, opening the app.
 
   Edit include/config.h   for GPIO map, zone count, and behaviour.
-  Edit include/secrets.h  for WiFi credentials, API key, and CONTROLLER_ID.
+  Edit include/secrets.h  for WiFi credentials, API keys, and CONTROLLER_ID.
   ─────────────────────────────────────────────────────────────────────────────
 */
 
 #include <Arduino.h>
 #include <LittleFS.h>
 #include <WiFi.h>
+#include <DNSServer.h>
 #include <ESPmDNS.h>
 #include <WebServer.h>
 #include <ArduinoJson.h>
+#include "driver/gpio.h"  // IDF — glitch-free GPIO init
 
 #include <time.h>
 #include "config.h"
 #include "secrets.h"
+#include "ui_html.h"   // auto-generated from data/index.html by pre_gen_ui.py
 
 // ─── Forward declarations ────────────────────────────────────────────────────
 void allOff();
 bool checkAuth();
+bool checkGuestAuth();
 void setCorsHeaders();
 void sendUnauthorized();
 void sendBadRequest(const char* msg);
@@ -53,6 +66,7 @@ void checkSchedules();
 
 // ─── Runtime state ───────────────────────────────────────────────────────────
 WebServer server(80);
+DNSServer dnsServer;
 
 int  activeZone        = 0;      // 0 = none running
 bool manualRun         = false;
@@ -84,6 +98,13 @@ void allOff() {
     activeScheduleIdx = -1;
     stopAtMillis      = 0;
     Serial.println("[relay] all zones OFF");
+    // Status LED off
+    if (STATUS_LED_PIN >= 0) digitalWrite(STATUS_LED_PIN, STATUS_LED_ACTIVE_LOW ? HIGH : LOW);
+}
+
+// Light status LED whenever a zone is active
+inline void statusLedOn() {
+    if (STATUS_LED_PIN >= 0) digitalWrite(STATUS_LED_PIN, STATUS_LED_ACTIVE_LOW ? LOW : HIGH);
 }
 
 // ─── Battery monitor ─────────────────────────────────────────────────────────
@@ -111,9 +132,17 @@ void setCorsHeaders() {
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
+// Full auth  — accepts only API_KEY (owner: read + write everything)
 bool checkAuth() {
     if (!server.hasHeader("x-api-key")) return false;
     return server.header("x-api-key") == String(API_KEY);
+}
+
+// Guest auth — accepts API_KEY OR GUEST_KEY (run-only: status, config read, manual)
+bool checkGuestAuth() {
+    if (!server.hasHeader("x-api-key")) return false;
+    String k = server.header("x-api-key");
+    return k == String(API_KEY) || k == String(GUEST_KEY);
 }
 
 void sendUnauthorized() {
@@ -159,7 +188,7 @@ void saveConfig() {
 
 // ─── GET /api/status ──────────────────────────────────────────────────────────
 void handleStatus() {
-    if (!checkAuth()) return sendUnauthorized();
+    if (!checkGuestAuth()) return sendUnauthorized();
 
     unsigned long now = millis();
     int remaining = 0;
@@ -188,7 +217,7 @@ void handleStatus() {
 
 // ─── GET /api/config ──────────────────────────────────────────────────────────
 void handleGetConfig() {
-    if (!checkAuth()) return sendUnauthorized();
+    if (!checkGuestAuth()) return sendUnauthorized();
     setCorsHeaders();
     server.send(200, "application/json", configJson);
 }
@@ -218,7 +247,7 @@ void handlePostConfig() {
 
 // ─── POST /api/manual ─────────────────────────────────────────────────────────
 void handleManual() {
-    if (!checkAuth()) return sendUnauthorized();
+    if (!checkGuestAuth()) return sendUnauthorized();
 
     JsonDocument req;
     DeserializationError err = deserializeJson(req, server.arg("plain"));
@@ -245,6 +274,7 @@ void handleManual() {
     scheduledRun = false;
     stopAtMillis = millis() + (unsigned long)durMin * 60000UL;
     relayOn(RELAY_PINS[zone - 1]);
+    statusLedOn();
     Serial.printf("[relay] zone %d ON for %d min\n", zone, durMin);
 
     JsonDocument res;
@@ -378,6 +408,7 @@ void checkSchedules() {
             activeScheduleIdx = si;
             stopAtMillis      = millis() + (unsigned long)durMin * 60000UL;
             relayOn(pin);
+            statusLedOn();
             Serial.printf("[sched] relay ON — zone=%d schedIdx=%d pin=%d stopAt=%lu now=%lu\n",
                           zoneId, si, pin, stopAtMillis, millis());
             return;
@@ -531,7 +562,10 @@ void advertiseMDNS() {
 
 void connectWiFi() {
     Serial.printf("[wifi] connecting to %s", WIFI_SSID);
-    WiFi.mode(WIFI_STA);
+    WiFi.mode(WIFI_AP_STA);
+    // Re-assert relays immediately after mode change — the RF subsystem spin-up
+    // causes a sustained current draw that can glitch active-LOW relay pins LOW.
+    for (int i = 0; i < MAX_ZONES; i++) relayOff(RELAY_PINS[i]);
     WiFi.disconnect(true);
     delay(100);
     WiFi.setHostname(HOSTNAME);
@@ -548,6 +582,19 @@ void connectWiFi() {
     } else {
         Serial.println("\n[wifi] failed — will retry");
     }
+    // Always start the guest AP regardless of STA result
+    // Brief pause before softAP — the current surge from AP startup can cause a voltage
+    // dip that momentarily releases active-LOW relays. The delay + re-assertion below
+    // prevents any zone from unexpectedly activating.
+    delay(100);
+    WiFi.softAP(AP_SSID, AP_PASS, 6, 0, 4);  // channel 6, visible, max 4 clients
+    delay(50);
+    // Re-assert all relay pins to OFF after AP startup power surge
+    for (int i = 0; i < MAX_ZONES; i++) relayOff(RELAY_PINS[i]);
+    Serial.printf("[ap] hotspot '%s' started  IP=%s\n", AP_SSID, WiFi.softAPIP().toString().c_str());
+    // Captive portal DNS — wildcard all domains to our AP IP
+    dnsServer.start(53, "*", WiFi.softAPIP());
+    Serial.println("[dns] captive portal DNS started");
 }
 
 // ─── NTP sync ─────────────────────────────────────────────────────────────────
@@ -605,34 +652,42 @@ void setup() {
         Serial.printf("[fs] configJson=%s\n", configJson.c_str());
     }
 
-    // Init relay pins — all OFF immediately
+    // Init relay pins.
+    // 1. gpio_reset_pin()  — detaches UART0/JTAG peripheral from the pin so it
+    //                        becomes a plain GPIO (essential for GPIO20/21).
+    // 2. gpio_set_level()  — pre-loads the IDF output latch to HIGH (inactive
+    //                        for active-LOW) before the driver is enabled.
+    // 3. pinMode(OUTPUT)   — enables the output driver via the Arduino HAL so
+    //                        subsequent digitalWrite() calls work correctly.
     for (int i = 0; i < MAX_ZONES; i++) {
-        pinMode(RELAY_PINS[i], OUTPUT);
-        relayOff(RELAY_PINS[i]);
+        gpio_num_t pin = (gpio_num_t)RELAY_PINS[i];
+        gpio_reset_pin(pin);                             // detach any peripheral
+        gpio_set_level(pin, RELAY_ACTIVE_LOW ? 1 : 0);  // pre-load latch HIGH
+        pinMode(pin, OUTPUT);                            // register with Arduino HAL
     }
     Serial.printf("[relay] %d zone pins initialised (all OFF)\n", MAX_ZONES);
 
-    // Init battery ADC pin if configured
-    if (BATTERY_ADC_PIN >= 0) {
-        pinMode(BATTERY_ADC_PIN, INPUT);
-        Serial.printf("[battery] monitoring on pin %d\n", BATTERY_ADC_PIN);
+    // Init status LED — same approach
+    if (STATUS_LED_PIN >= 0) {
+        gpio_num_t pin = (gpio_num_t)STATUS_LED_PIN;
+        gpio_reset_pin(pin);
+        gpio_set_level(pin, STATUS_LED_ACTIVE_LOW ? 1 : 0);
+        pinMode(pin, OUTPUT);
+        Serial.printf("[led] status LED on pin %d\n", STATUS_LED_PIN);
     }
-
-    // Startup test — flash each relay/LED in sequence
-    Serial.println("[test] LED startup sequence");
-    for (int i = 0; i < MAX_ZONES; i++) {
-        relayOn(RELAY_PINS[i]);
-        Serial.printf("[test] zone %d ON\n", i + 1);
-        delay(500);
-        relayOff(RELAY_PINS[i]);
-    }
-    Serial.println("[test] sequence complete");
 
     connectWiFi();
 
     // Capture the x-api-key header on every request
     const char* collectHeaders[] = { "x-api-key" };
     server.collectHeaders(collectHeaders, 1);
+
+    // ── Embedded UI (compiled-in HTML, no filesystem required) ───────────────
+    auto serveUI = []() {
+        server.send(200, "text/html", UI_HTML);
+    };
+    server.on("/",           HTTP_GET, serveUI);
+    server.on("/index.html", HTTP_GET, serveUI);
 
     // ── API routes ─────────────────────────────────────────────────────────
     server.on("/api/status", HTTP_GET,     handleStatus);
@@ -655,8 +710,13 @@ void setup() {
     server.on("/api/time",   HTTP_OPTIONS, handleOptions);
     server.on("/api/debug",  HTTP_OPTIONS, handleOptions);
 
-    // Catch-all 404
+    // Catch-all: redirect non-API requests to captive portal UI with guest key pre-filled
     server.onNotFound([]() {
+        if (!server.uri().startsWith("/api/")) {
+            server.sendHeader("Location", "http://192.168.4.1/?key=" GUEST_KEY);
+            server.send(302, "text/plain", "");
+            return;
+        }
         setCorsHeaders();
         server.send(404, "application/json", "{\"error\":\"not found\"}");
     });
@@ -667,6 +727,7 @@ void setup() {
 
 // ─── loop ─────────────────────────────────────────────────────────────────────
 void loop() {
+    dnsServer.processNextRequest();
     server.handleClient();
 
     unsigned long nowMs = millis();
