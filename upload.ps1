@@ -54,5 +54,4 @@ if ($UploadFS) {
 }
 
 Write-Host ""
-Write-Host "Upload successful! Opening monitor (Ctrl+C to exit)..." -ForegroundColor Green
-& $pio device monitor --port $Port --baud 115200 --project-dir "$PSScriptRoot\esp32"
+Write-Host "Upload successful!" -ForegroundColor Green

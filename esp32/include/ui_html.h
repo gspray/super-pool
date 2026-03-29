@@ -228,6 +228,15 @@ static const char UI_HTML[] PROGMEM = R"=====(
             margin-top: .5rem
         }
 
+        .sched-slot.sched-off .sched-time,
+        .sched-slot.sched-off .sched-dur,
+        .sched-slot.sched-off .sched-label,
+        .sched-slot.sched-off .min-lbl,
+        .sched-slot.sched-off .days-row {
+            opacity: .3;
+            pointer-events: none
+        }
+
         .sched-row {
             display: flex;
             align-items: center;
@@ -469,9 +478,25 @@ static const char UI_HTML[] PROGMEM = R"=====(
             z-index: 999;
             text-align: center;
         }
-        #guest-splash .splash-icon { font-size: 3.5rem; margin-bottom: .75rem; }
-        #guest-splash h2 { font-size: 1.5rem; font-weight: 700; margin: 0 0 .5rem; }
-        #guest-splash .splash-sub { font-size: .95rem; opacity: .75; margin: 0 0 1.25rem; letter-spacing: .02em; }
+
+        #guest-splash .splash-icon {
+            font-size: 3.5rem;
+            margin-bottom: .75rem;
+        }
+
+        #guest-splash h2 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin: 0 0 .5rem;
+        }
+
+        #guest-splash .splash-sub {
+            font-size: .95rem;
+            opacity: .75;
+            margin: 0 0 1.25rem;
+            letter-spacing: .02em;
+        }
+
         #guest-splash p {
             font-size: .95rem;
             line-height: 1.6;
@@ -479,11 +504,13 @@ static const char UI_HTML[] PROGMEM = R"=====(
             margin: 0 0 2rem;
             opacity: .9;
         }
+
         #guest-splash .splash-note {
             font-size: .78rem;
             opacity: .55;
             margin: -1.25rem 0 2rem;
         }
+
         #btn-splash-go {
             background: #0ea5e9;
             color: #fff;
@@ -493,10 +520,16 @@ static const char UI_HTML[] PROGMEM = R"=====(
             font-size: 1.05rem;
             font-weight: 600;
             cursor: pointer;
-            box-shadow: 0 4px 14px rgba(14,165,233,.4);
+            box-shadow: 0 4px 14px rgba(14, 165, 233, .4);
         }
-        #btn-splash-go:active { transform: scale(.97); }
-        #guest-splash.hidden { display: none; }
+
+        #btn-splash-go:active {
+            transform: scale(.97);
+        }
+
+        #guest-splash.hidden {
+            display: none;
+        }
     </style>
 </head>
 
@@ -540,6 +573,7 @@ static const char UI_HTML[] PROGMEM = R"=====(
         let cfg = { zones: [] }, st = {}, endsAt = 0, pollTimer = null, cdTimer = null;
         let view = 'dash', espEpoch = 0, epochAt = 0;
         const DAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+        const QR_WIFI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAXIAAAFyAQAAAADAX2ykAAACwElEQVR4nO1bUY6jMAx9MfynUg/Qo9CbjfZmcKCV4HMkkFd2AsywUkg1KtMUv48MxU+VFY+TFzt1jEfQ0UN0wPhp0I59C+OnQTv2LYyfBu3YtzB+GrRj38L4Z5gfF1GHJ2CQp8skT7PtfqA/+aAHuCfmNyzo40vnbiPQ9BW7Oyo18Wv7nw06KX+IGcqtDoNz3A51+KiJfbA/uaBsZsDZ+e6DRwBeEtaPiKvy7/mzB9plnJtfbz4zhis7+CkYGMOx/pDxnzI/nlnXYnQX2Y77itFwzF9mzekffX8uKJsZYPys/O2c/qngmv4q2/F1lIEdICJ6hc1nGvRi/FrHr0VK/+nC0N1GMfBL+0/GT4P18NP0i3SWlTosyH4Ec18xt16OS/K6tflMg14yvqxhXKOqOzE0qroTS/QVFt9C9bP/dIzhIoJZX1WqqDjsvaq5jvGHjP+M+emkgtHdmN09nHonKXdMLqazHod/8v3ZoHyqwvg5+eua/jo6oBbVLEmMqUZ3+RufgkFh85kGvaa+EgQZtZ6E8UVuzbD9t8j4cqtthCCjvqvmfiaafi43vsDSJgphDAeicYm05W/R8eWYtVqaXM9MmDsN0HKlrc/l6udLxaqf+c+NGZ229lHFjdnqz29Rv+KQsJuleZy7/5a/xcaXJZYhqhLQuCd7fVoWbotv4fq5DQvynLWY1+cgoi2+Bcd3wXwgioIKYQjVadNX5d+fhHYFY/5O4SZl7Bke6E8+6AHuifmNZuecuu6jX/SzH3/Dn2xQPvXs+hm6DGsTeKlqIMDqG29zf/LumfVqe0xi7R/JdXe73/4O8YXchP4inRVrEboA/9Ogs/b3WUILcHdfr1xV0t+XQbv/h/hDxn9WfxDxVLTWrxDL0WFPtvNRgf+fzn7fXVS8yPhJUNr8H4yfBu3YtzB+GrRj38L4aZQ+P/8AwJLzICDRvYgAAAAASUVORK5CYII=';
 
         // ── Utility ──────────────────────────────────────────────────────────────────
         function esc(s) {
@@ -672,8 +706,16 @@ static const char UI_HTML[] PROGMEM = R"=====(
             }, 1200);
 
             card.querySelectorAll('.sched-slot').forEach(sl => {
+                const enCb = sl.querySelector('.sched-en');
                 const allCb = sl.querySelector('.all-cb');
                 const dayCbs = [...sl.querySelectorAll('input[data-day]')];
+
+                function applyEnabled() {
+                    sl.classList.toggle('sched-off', !enCb.checked);
+                }
+                applyEnabled();
+                enCb.addEventListener('change', applyEnabled);
+
                 if (allCb) {
                     allCb.addEventListener('change', () => dayCbs.forEach(c => c.checked = allCb.checked));
                     dayCbs.forEach(c => c.addEventListener('change', () => allCb.checked = dayCbs.every(d => d.checked)));
@@ -709,6 +751,28 @@ static const char UI_HTML[] PROGMEM = R"=====(
         }
 
         // ── Poll ────────────────────────────────────────────────────────────────────
+        function mainHasFocus() {
+            const ae = document.activeElement;
+            return ae && document.getElementById('main').contains(ae) &&
+                (ae.tagName === 'INPUT' || ae.tagName === 'SELECT' || ae.tagName === 'TEXTAREA');
+        }
+
+        // Lightweight patch: updates only active-state, buttons and timers without
+        // rebuilding the DOM (used when an input inside #main is focused).
+        function patchDash() {
+            const active = (st.manualRun || st.scheduledRun) && st.activeZone;
+            (cfg.zones || []).forEach(z => {
+                const card = document.getElementById('zc' + z.id);
+                if (!card) return;
+                const isActive = active && st.activeZone === z.id;
+                card.classList.toggle('active', !!isActive);
+                const runBtn = card.querySelector('.btn-run');
+                const stopBtn = card.querySelector('.btn-stop');
+                if (runBtn) runBtn.disabled = !st.online || !!isActive;
+                if (stopBtn) stopBtn.disabled = !isActive;
+            });
+        }
+
         async function poll() {
             try {
                 const [s, c] = await Promise.all([api('GET', '/api/status'), api('GET', '/api/config')]);
@@ -720,7 +784,10 @@ static const char UI_HTML[] PROGMEM = R"=====(
                     if (t.epoch > 1e9) { espEpoch = t.epoch; epochAt = Date.now(); }
                 } catch { }
             } catch { st = { online: false }; }
-            if (view === 'dash') renderDash();
+            if (view === 'dash') {
+                if (mainHasFocus()) patchDash();
+                else renderDash();
+            }
             updateBadge();
         }
 
@@ -767,6 +834,15 @@ static const char UI_HTML[] PROGMEM = R"=====(
                 '<div class="settings-section">' +
                 '<h3>Zones</h3>' +
                 '<button class="btn btn-primary btn-sm" id="btn-editzones">&#x1F33F; Edit Zones</button>' +
+                '</div>' +
+                '<div class="settings-section">' +
+                '<h3>Guest Access</h3>' +
+                '<p style="font-size:.85rem;opacity:.7;margin:.25rem 0 .75rem">Print and affix to the enclosure.<br>Guests scan to join the Sprinkler Wi\u2011Fi and open the app.</p>' +
+                '<div style="display:flex;flex-direction:column;align-items:center;gap:.6rem;margin-bottom:.5rem">' +
+                '<img src="' + QR_WIFI + '" style="width:160px;height:160px;border-radius:.5rem;background:#fff;padding:6px" alt="Wi-Fi QR"/>' +
+                '<div style="font-size:.8rem;opacity:.6;text-align:center">Network: <b>Sprinkler</b><br>Password: <b>sprinklerNow</b></div>' +
+                '</div>' +
+                '<button class="btn btn-primary btn-sm" id="btn-print-qr">&#x1F5A8; Print</button>' +
                 '</div>';
             document.getElementById('btn-savekey').onclick = () => {
                 const k = document.getElementById('f-key').value.trim();
@@ -775,6 +851,18 @@ static const char UI_HTML[] PROGMEM = R"=====(
                 toast('Saved', 'success');
             };
             document.getElementById('btn-editzones').onclick = openEditZones;
+            document.getElementById('btn-print-qr').onclick = () => {
+                const w = window.open('', '_blank');
+                w.document.write('<html><body style="text-align:center;font-family:sans-serif;padding:2rem">' +
+                    '<h2>Sprinkler Guest Access</h2>' +
+                    '<p>Scan to join the Sprinkler Wi-Fi, then the app opens automatically.</p>' +
+                    '<img src="' + QR_WIFI + '" style="width:220px;height:220px"/>' +
+                    '<p><b>Network:</b> Sprinkler &nbsp;&nbsp; <b>Password:</b> sprinklerNow</p>' +
+                    '<p style="font-size:.85rem;color:#666">Stay within range of the sprinkler enclosure &bull; No internet access</p>' +
+                    '<script>window.onload=()=>window.print()<\/script>' +
+                    '</body></html>');
+                w.document.close();
+            };
         }
 
         // ── Edit Zones sheet ─────────────────────────────────────────────────────────
