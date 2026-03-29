@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Downloads the self-signed TLS cert from the VM and installs it in the
     Windows Trusted Root CA store so Chrome/Edge trust the HTTPS site.
@@ -13,9 +13,9 @@ $ErrorActionPreference = 'Stop'
 $VM_USER = "gspray"
 $VM_HOST = "192.168.86.85"
 $VM_SSH  = "${VM_USER}@${VM_HOST}"
-$CERT_REMOTE = "/home/${VM_USER}/sprinkler/certs/cert.pem"
-$CERT_LOCAL  = Join-Path $env:TEMP "sprinkler-vm.pem"
-$CER_LOCAL   = Join-Path $env:TEMP "sprinkler-vm.cer"
+$CERT_REMOTE = "/home/${VM_USER}/super-pool/certs/cert.pem"
+$CERT_LOCAL  = Join-Path $env:TEMP "super-pool-vm.pem"
+$CER_LOCAL   = Join-Path $env:TEMP "super-pool-vm.cer"
 
 Write-Host "Downloading cert from VM..." -ForegroundColor Cyan
 $proc = Start-Process -FilePath "ssh" `
@@ -32,7 +32,7 @@ $bytes = [Convert]::FromBase64String($b64)
 
 # Check if already installed
 $existing = Get-ChildItem Cert:\LocalMachine\Root |
-    Where-Object { $_.Subject -match 'sprinkler' }
+    Where-Object { $_.Subject -match 'super-pool' }
 
 if ($existing) {
     Write-Host "Cert already trusted: $($existing.Subject)" -ForegroundColor Green

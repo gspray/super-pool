@@ -1,5 +1,5 @@
-/*
-  main.cpp — ESP32 Sprinkler Controller (PlatformIO)
+﻿/*
+  main.cpp — ESP32 Super Pool Controller (PlatformIO)
   ─────────────────────────────────────────────────────────────────────────────
   Endpoints
     GET  /api/status          current state
@@ -8,7 +8,7 @@
     POST /api/manual          turn a zone ON (with timer) or OFF
 
   Discovery
-    mDNS service  _sprinklerapi._tcp.local
+    mDNS service  _superpoolapi._tcp.local
     TXT records   id=<CONTROLLER_ID>  api=1  model=SprayCtrl
 
   Security:
@@ -549,15 +549,15 @@ void advertiseMDNS() {
         Serial.println("[mdns] begin failed");
         return;
     }
-    // Hostname resolution: http://esp-sprinkler.local
+    // Hostname resolution: http://esp-super-pool.local
     Serial.printf("[mdns] hostname  http://%s.local\n", HOSTNAME);
 
     // Service advertisement picked up by Home Assistant zeroconf
-    MDNS.addService("sprinklerapi", "tcp", 80);
-    MDNS.addServiceTxt("sprinklerapi", "tcp", "id",    CONTROLLER_ID);
-    MDNS.addServiceTxt("sprinklerapi", "tcp", "api",   "1");
-    MDNS.addServiceTxt("sprinklerapi", "tcp", "model", "SprayCtrl");
-    Serial.printf("[mdns] advertising _sprinklerapi._tcp  id=%s\n", CONTROLLER_ID);
+    MDNS.addService("superpoolapi", "tcp", 80);
+    MDNS.addServiceTxt("superpoolapi", "tcp", "id",    CONTROLLER_ID);
+    MDNS.addServiceTxt("superpoolapi", "tcp", "api",   "1");
+    MDNS.addServiceTxt("superpoolapi", "tcp", "model", "SprayCtrl");
+    Serial.printf("[mdns] advertising _superpoolapi._tcp  id=%s\n", CONTROLLER_ID);
 }
 
 void connectWiFi() {
@@ -639,7 +639,7 @@ void setup() {
     delay(200);
 
     Serial.println("\n\n=====================================");
-    Serial.println("[boot] ESP32 Sprinkler Controller");
+    Serial.println("[boot] ESP32 Super Pool Controller");
     Serial.println("=====================================");
 
     // Mount LittleFS (format on first boot if needed)

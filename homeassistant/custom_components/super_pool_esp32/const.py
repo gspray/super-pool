@@ -1,6 +1,6 @@
-"""Constants for the Sprinkler ESP32 integration."""
+﻿"""Constants for the Super Pool ESP32 integration."""
 
-DOMAIN = "sprinkler_esp32"
+DOMAIN = "super_pool_esp32"
 
 CONF_URL     = "url"
 CONF_API_KEY = "api_key"

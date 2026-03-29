@@ -1,4 +1,4 @@
-# Sprinkler Controller — Wiring Guide
+﻿# Super Pool Controller — Wiring Guide
 
 **Hardware:** Seeed Studio XIAO ESP32-C3 · 4-Channel Opto-Isolated Relay Board · 24VAC Irrigation Transformer · (optional) 1S LiPo battery
 
@@ -10,7 +10,7 @@
 2. [System Overview](#2-system-overview)
 3. [ESP32-C3 Pinout Reference](#3-esp32-c3-pinout-reference)
 4. [ESP32 → Relay Board](#4-esp32--relay-board)
-5. [Relay Board → Solenoids (24VAC)](#5-relay-board--solenoids-24vac)
+5. [Relay Board → Solenoids (24VAC)](#5-relay-board--pool devices-24vac)
 6. [Power Supply](#6-power-supply)
 7. [Battery Monitor (optional)](#7-battery-monitor-optional)
 8. [Complete Wiring Diagram](#8-complete-wiring-diagram)
@@ -25,11 +25,11 @@
 | ----------------------------------- | ----------------------------------------------------------- |
 | Seeed Studio XIAO ESP32-C3          | Microcontroller — has built-in LiPo charge circuit          |
 | 4-channel opto-isolated relay board | 5V coil, active HIGH trigger                                |
-| 24VAC irrigation transformer        | e.g. Orbit 57040 or Hunter AC-2412 — ~1A minimum            |
+| 24VAC pool/AC transformer        | e.g. Orbit 57040 or Hunter AC-2412 — ~1A minimum            |
 | **4× 10kΩ resistors (required)**    | **Pull-ups on relay IN pins — prevents boot-time firing**   |
 | 2× 100kΩ resistors                  | For battery voltage divider (only if using battery monitor) |
 | 1S LiPo battery                     | 3.7V nominal — plugs into XIAO's onboard JST connector      |
-| Sprinkler solenoid valves           | Standard 24VAC ½" or ¾" valves                              |
+| Pool devices           | Standard 24VAC ½" or ¾" valves                              |
 | Wire                                | 18–22 AWG for low-voltage runs                              |
 
 ---
@@ -49,11 +49,11 @@
 │                                        NO1 NO2 NO3 NO4      │
 │                                         │   │   │   │       │
 │                                       Zone1 Z2  Z3  Z4      │
-│                                       solenoid wires        │
+│                                       pool device wires        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-The ESP32 controls relay coils (3.3V logic). The relay switches the 24VAC circuit to each solenoid. The two sides are fully isolated by the opto-couplers.
+The ESP32 controls relay coils (3.3V logic). The relay switches the 24VAC circuit to each pool device. The two sides are fully isolated by the opto-couplers.
 
 ---
 
@@ -144,7 +144,7 @@ This relay board activates when the input pin is driven **HIGH**. The firmware i
 #define RELAY_ACTIVE_LOW false
 ```
 
-When a GPIO goes HIGH → opto-coupler conducts → relay coil energises → NO contact closes → solenoid opens.
+When a GPIO goes HIGH → opto-coupler conducts → relay coil energises → NO contact closes → pool device opens.
 
 ---
 
@@ -165,15 +165,15 @@ Each channel has 3 screw terminals:
 ```
 24VAC Transformer
   ├── HOT  ──────────── bridge wire ──── COM1, COM2, COM3, COM4  (all 4 COM terminals)
-  └── COMMON ─────────────────────────── White wire (runs to all solenoids in yard)
+  └── COMMON ─────────────────────────── White wire (runs to all pool devices in yard)
 
 Relay board:
-  NO1 ──── Zone 1 solenoid wire (e.g. red)
-  NO2 ──── Zone 2 solenoid wire (e.g. blue)
-  NO3 ──── Zone 3 solenoid wire (e.g. green)
-  NO4 ──── Zone 4 solenoid wire (e.g. yellow)
+  NO1 ──── Zone 1 pool device wire (e.g. red)
+  NO2 ──── Zone 2 pool device wire (e.g. blue)
+  NO3 ──── Zone 3 pool device wire (e.g. green)
+  NO4 ──── Zone 4 pool device wire (e.g. yellow)
 
-Each solenoid has 2 wires:
+Each pool device has 2 wires:
   Wire 1 ──── relay NO terminal (zone-specific color)
   Wire 2 ──── common rail (white wire, back to transformer COMMON)
 ```
@@ -188,7 +188,7 @@ Transformer HOT ──── COM1 ──┬── COM2 ──┬── COM3 ─�
                         (bridge)   (bridge)   (bridge)
 ```
 
-> **Note:** Sprinkler solenoids are not polarity-sensitive — it does not matter which solenoid wire goes to NO vs the common rail.
+> **Note:** Pool devices are not polarity-sensitive — it does not matter which pool device wire goes to NO vs the common rail.
 
 ---
 
@@ -211,9 +211,9 @@ The relay board coils need 5V. Run a wire from the XIAO's **5V pin** to the rela
 
 ### 24VAC transformer
 
-Plug into a standard 120VAC outlet nearby. Most irrigation transformers output 24VAC at 500mA–1A. Each solenoid draws ~200–300mA when energised.
+Plug into a standard 120VAC outlet nearby. Most pool/AC transformers output 24VAC at 500mA–1A. Each pool device draws ~200–300mA when energised.
 
-> Only one zone runs at a time (enforced by firmware), so a 500mA transformer handles any single solenoid.
+> Only one zone runs at a time (enforced by firmware), so a 500mA transformer handles any single pool device.
 
 ---
 
@@ -270,7 +270,7 @@ This creates a 2:1 divider:
                            HOT            COMMON
                              │                │
                          ────┼────            └────────── White wire
-                        COM1─┤              (runs to all solenoid
+                        COM1─┤              (runs to all pool device
                         COM2─┤               commons in yard)
                         COM3─┤
                         COM4─┘ (all bridged together)
@@ -317,7 +317,7 @@ constexpr int RELAY_PINS[MAX_ZONES] = { 3, 10, 20, 21 };
 // GPIO3=D1, GPIO10=D10, GPIO20=D7, GPIO21=D6
 // Avoids JTAG pins GPIO4-7 which are driven LOW at boot.
 
-#define HOSTNAME         "esp-sprinkler"   // → http://esp-sprinkler.local
+#define HOSTNAME         "esp-super-pool"   // → http://esp-super-pool.local
 #define NTP_TZ           "PST8PDT,M3.2.0,M11.1.0"  // US Pacific
 
 // Battery (disabled until wired up)
@@ -339,7 +339,7 @@ constexpr int RELAY_PINS[MAX_ZONES] = { 3, 10, 20, 21 };
 
 ## 10. Testing & Verification
 
-### Step 1 — Test relay board without solenoids
+### Step 1 — Test relay board without pool devices
 
 With just the ESP32 + relay board connected (no 24VAC yet):
 
@@ -348,14 +348,14 @@ With just the ESP32 + relay board connected (no 24VAC yet):
 3. You should hear the relay **click** and the board's LED for that channel should light up
 4. Tap **All Off** — relay clicks off
 
-### Step 2 — Test with 24VAC (no solenoids)
+### Step 2 — Test with 24VAC (no pool devices)
 
 1. Connect the transformer to the relay COM rail
 2. Use a multimeter set to AC voltage
 3. Run a zone — measure between NO and GND → should read ~24VAC
 4. All Off → back to 0VAC
 
-### Step 3 — Full test with solenoids
+### Step 3 — Full test with pool devices
 
 1. Connect zone wires
 2. Run each zone for 30 seconds
@@ -366,7 +366,7 @@ With just the ESP32 + relay board connected (no 24VAC yet):
 
 | Symptom                                | Likely cause                                                     |
 | -------------------------------------- | ---------------------------------------------------------------- |
-| Relay clicks but solenoid doesn't open | Check 24VAC at COM; check solenoid common wire                   |
+| Relay clicks but pool device doesn't open | Check 24VAC at COM; check pool device common wire                   |
 | Zone runs but wrong valve opens        | Zone wires swapped — remap in PWA Settings                       |
 | Relay doesn't click                    | Check IN pin wiring; verify `RELAY_ACTIVE_LOW false` in config.h |
 | All zones run simultaneously           | Common wire disconnected from transformer                        |

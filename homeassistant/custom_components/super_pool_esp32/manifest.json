@@ -1,6 +1,6 @@
-{
-	"domain": "sprinkler_esp32",
-	"name": "Sprinkler ESP32",
+﻿{
+	"domain": "super_pool_esp32",
+	"name": "Super Pool ESP32",
 	"version": "1.0.0",
 	"codeowners": [],
 	"dependencies": [],
@@ -8,5 +8,5 @@
 	"integration_type": "hub",
 	"iot_class": "local_polling",
 	"requirements": [],
-	"zeroconf": [{ "type": "_sprinklerapi._tcp.local." }]
+	"zeroconf": [{ "type": "_superpoolapi._tcp.local." }]
 }

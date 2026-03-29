@@ -1,4 +1,4 @@
-# Sprinkler — ESP32 Controller
+﻿# Super Pool — ESP32 Controller
 
 Replaces a Rain Bird controller with an ESP32 relay board. The ESP32 hosts its own HTTP API and PWA directly — no intermediate server required.
 
@@ -9,7 +9,7 @@ Replaces a Rain Bird controller with an ESP32 relay board. The ESP32 hosts its o
       ↓
 [ 8-ch Relay board ]
       ↓
-[ Irrigation valves ]
+[ Pool devices ]
 ```
 
 ---
@@ -17,7 +17,7 @@ Replaces a Rain Bird controller with an ESP32 relay board. The ESP32 hosts its o
 ## Directory layout
 
 ```
-sprinkler/
+super-pool/
 ├── esp32/
 │   ├── platformio.ini        ← board, framework, lib dependencies
 │   ├── include/
@@ -30,7 +30,7 @@ sprinkler/
 │       └── index.html        ← PWA served from ESP32 SPIFFS
 ├── homeassistant/
 │   └── custom_components/
-│       └── sprinkler_esp32/  ← Home Assistant integration
+│       └── super_pool_esp32/  ← Home Assistant integration
 ├── upload.ps1                ← build + flash helper
 └── WIRING.md
 ```
@@ -151,5 +151,5 @@ To expose externally: put Nginx in front with TLS and restrict to your IP.
 
 ## Home Assistant
 
-A custom integration is provided in `homeassistant/custom_components/sprinkler_esp32/`.  
+A custom integration is provided in `homeassistant/custom_components/super_pool_esp32/`.  
 Copy that folder to your HA `config/custom_components/` directory and restart. The integration discovers the ESP32 via mDNS or a manually entered IP.

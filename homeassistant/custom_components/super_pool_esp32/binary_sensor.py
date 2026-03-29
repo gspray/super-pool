@@ -1,4 +1,4 @@
-"""Binary sensor — ESP connectivity."""
+﻿"""Binary sensor — ESP connectivity."""
 from __future__ import annotations
 
 from homeassistant.components.binary_sensor import (
@@ -10,8 +10,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .coordinator import SprinklerESPCoordinator
-from .entity import SprinklerESPEntity
+from .coordinator import SuperPoolESPCoordinator
+from .entity import SuperPoolESPEntity
 
 
 async def async_setup_entry(
@@ -19,11 +19,11 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coordinator: SprinklerESPCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: SuperPoolESPCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities([ControllerOnlineSensor(coordinator, entry)])
 
 
-class ControllerOnlineSensor(SprinklerESPEntity, BinarySensorEntity):
+class ControllerOnlineSensor(SuperPoolESPEntity, BinarySensorEntity):
     """True when HA can reach the ESP32."""
 
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
@@ -31,7 +31,7 @@ class ControllerOnlineSensor(SprinklerESPEntity, BinarySensorEntity):
 
     def __init__(
         self,
-        coordinator: SprinklerESPCoordinator,
+        coordinator: SuperPoolESPCoordinator,
         entry: ConfigEntry,
     ) -> None:
         super().__init__(coordinator, entry)

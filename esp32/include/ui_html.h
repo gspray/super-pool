@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // AUTO-GENERATED from data/index.html — do not edit directly
 // Re-generated every build by pre_gen_ui.py
 static const char UI_HTML[] PROGMEM = R"=====(
@@ -8,7 +8,7 @@ static const char UI_HTML[] PROGMEM = R"=====(
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Sprinkler</title>
+    <title>Super Pool</title>
     <style>
         * {
             box-sizing: border-box;
@@ -537,14 +537,14 @@ static const char UI_HTML[] PROGMEM = R"=====(
     <!-- Guest splash — only shown when ?key= param is present (landscaper mode) -->
     <div id="guest-splash" class="hidden">
         <div class="splash-icon">&#x1F4A7;</div>
-        <h2>Sprinkler Control</h2>
+        <h2>Super Pool Control</h2>
         <div class="splash-sub">Guest Access</div>
         <p>You can view zone status and run zones manually.<br>Schedule and config changes are not available in guest mode.</p>
-        <p class="splash-note">&#x1F4F6; Stay within range of the sprinkler enclosure.<br>This network has no internet access.</p>
+        <p class="splash-note">&#x1F4F6; Stay within range of the pool equipment enclosure.<br>This network has no internet access.</p>
         <button id="btn-splash-go">Get Started</button>
     </div>
     <header>
-        <h1 id="h-title">&#x1F4A7; Sprinkler</h1>
+        <h1 id="h-title">&#x1F4A7; Super Pool</h1>
         <span id="h-clock" class="esp-clock"></span>
         <div class="hdr-right">
             <span id="h-badge" class="badge">...</span>
@@ -837,10 +837,10 @@ static const char UI_HTML[] PROGMEM = R"=====(
                 '</div>' +
                 '<div class="settings-section">' +
                 '<h3>Guest Access</h3>' +
-                '<p style="font-size:.85rem;opacity:.7;margin:.25rem 0 .75rem">Print and affix to the enclosure.<br>Guests scan to join the Sprinkler Wi\u2011Fi and open the app.</p>' +
+                '<p style="font-size:.85rem;opacity:.7;margin:.25rem 0 .75rem">Print and affix to the enclosure.<br>Guests scan to join the Super Pool Wi\u2011Fi and open the app.</p>' +
                 '<div style="display:flex;flex-direction:column;align-items:center;gap:.6rem;margin-bottom:.5rem">' +
                 '<img src="' + QR_WIFI + '" style="width:160px;height:160px;border-radius:.5rem;background:#fff;padding:6px" alt="Wi-Fi QR"/>' +
-                '<div style="font-size:.8rem;opacity:.6;text-align:center">Network: <b>Sprinkler</b><br>Password: <b>sprinklerNow</b></div>' +
+                '<div style="font-size:.8rem;opacity:.6;text-align:center">Network: <b>Super Pool</b><br>Password: <b>superpoolNow</b></div>' +
                 '</div>' +
                 '<button class="btn btn-primary btn-sm" id="btn-print-qr">&#x1F5A8; Print</button>' +
                 '</div>';
@@ -854,11 +854,11 @@ static const char UI_HTML[] PROGMEM = R"=====(
             document.getElementById('btn-print-qr').onclick = () => {
                 const w = window.open('', '_blank');
                 w.document.write('<html><body style="text-align:center;font-family:sans-serif;padding:2rem">' +
-                    '<h2>Sprinkler Guest Access</h2>' +
-                    '<p>Scan to join the Sprinkler Wi-Fi, then the app opens automatically.</p>' +
+                    '<h2>Super Pool Guest Access</h2>' +
+                    '<p>Scan to join the Super Pool Wi-Fi, then the app opens automatically.</p>' +
                     '<img src="' + QR_WIFI + '" style="width:220px;height:220px"/>' +
-                    '<p><b>Network:</b> Sprinkler &nbsp;&nbsp; <b>Password:</b> sprinklerNow</p>' +
-                    '<p style="font-size:.85rem;color:#666">Stay within range of the sprinkler enclosure &bull; No internet access</p>' +
+                    '<p><b>Network:</b> Super Pool &nbsp;&nbsp; <b>Password:</b> superpoolNow</p>' +
+                    '<p style="font-size:.85rem;color:#666">Stay within range of the pool equipment enclosure &bull; No internet access</p>' +
                     '<script>window.onload=()=>window.print()<\/script>' +
                     '</body></html>');
                 w.document.close();
@@ -953,7 +953,7 @@ static const char UI_HTML[] PROGMEM = R"=====(
         if (guestMode) {
             // Landscaper QR session — hide settings, show read-only label
             document.getElementById('btn-nav').style.display = 'none';
-            document.getElementById('h-title').innerHTML = '&#x1F4A7; Sprinkler <span style="font-size:.7rem;opacity:.7;font-weight:400">Guest</span>';
+            document.getElementById('h-title').innerHTML = '&#x1F4A7; Super Pool <span style="font-size:.7rem;opacity:.7;font-weight:400">Guest</span>';
         }
 
         document.getElementById('btn-nav').addEventListener('click', () => {
@@ -961,7 +961,7 @@ static const char UI_HTML[] PROGMEM = R"=====(
             if (view === 'settings') {
                 view = 'dash';
                 document.getElementById('btn-nav').innerHTML = '&#x2699;&#xFE0F;';
-                document.getElementById('h-title').innerHTML = '&#x1F4A7; Sprinkler';
+                document.getElementById('h-title').innerHTML = '&#x1F4A7; Super Pool';
                 poll(); startPoll();
             } else {
                 view = 'settings';

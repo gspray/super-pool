@@ -1,4 +1,4 @@
-"""Button — All Off for the ESP controller."""
+﻿"""Button — All Off for the ESP controller."""
 from __future__ import annotations
 
 from homeassistant.components.button import ButtonEntity
@@ -7,8 +7,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .coordinator import SprinklerESPCoordinator
-from .entity import SprinklerESPEntity
+from .coordinator import SuperPoolESPCoordinator
+from .entity import SuperPoolESPEntity
 
 
 async def async_setup_entry(
@@ -16,11 +16,11 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coordinator: SprinklerESPCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: SuperPoolESPCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities([AllOffButton(coordinator, entry)])
 
 
-class AllOffButton(SprinklerESPEntity, ButtonEntity):
+class AllOffButton(SuperPoolESPEntity, ButtonEntity):
     """Immediately stops all zones."""
 
     _attr_icon = "mdi:stop-circle-outline"
@@ -28,7 +28,7 @@ class AllOffButton(SprinklerESPEntity, ButtonEntity):
 
     def __init__(
         self,
-        coordinator: SprinklerESPCoordinator,
+        coordinator: SuperPoolESPCoordinator,
         entry: ConfigEntry,
     ) -> None:
         super().__init__(coordinator, entry)

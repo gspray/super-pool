@@ -1,7 +1,7 @@
-{
-  "name": "esp32-sprinkler-tests",
+﻿{
+  "name": "esp32-super-pool-tests",
   "version": "1.0.0",
-  "description": "Integration tests for the ESP32 sprinkler controller",
+  "description": "Integration tests for the ESP32 super-pool controller",
   "private": true,
   "scripts": {
     "test": "jest --runInBand",

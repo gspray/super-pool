@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // ─────────────────────────────────────────────────────────────────────────────
 // config.h — hardware & behaviour settings
 // Edit this file to match your wiring and preferences.
@@ -30,7 +30,7 @@ constexpr int RELAY_PINS[MAX_ZONES] = { 3, 10, 20, 21 };
 
 // ── Network ───────────────────────────────────────────────────────────────────
 // mDNS hostname — device will be reachable at <HOSTNAME>.local
-#define HOSTNAME "esp-sprinkler"
+#define HOSTNAME "esp-super-pool"
 
 // Attempt WiFi reconnect after this many ms of being disconnected
 #define WIFI_RECONNECT_MS 15000

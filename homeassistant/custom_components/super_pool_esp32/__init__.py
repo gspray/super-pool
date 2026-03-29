@@ -1,4 +1,4 @@
-"""Sprinkler ESP32 integration — direct ESP32 mode."""
+﻿"""Super Pool ESP32 integration — direct ESP32 mode."""
 from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import CONF_API_KEY, CONF_URL, DOMAIN
-from .coordinator import SprinklerESPCoordinator
+from .coordinator import SuperPoolESPCoordinator
 
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
@@ -20,7 +20,7 @@ PLATFORMS: list[Platform] = [
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up one ESP32 controller from a config entry."""
     session = async_get_clientsession(hass)
-    coordinator = SprinklerESPCoordinator(
+    coordinator = SuperPoolESPCoordinator(
         hass,
         session,
         entry.data[CONF_URL],

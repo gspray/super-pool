@@ -1,4 +1,4 @@
-"""Data update coordinator for direct ESP32 polling."""
+﻿"""Data update coordinator for direct ESP32 polling."""
 from __future__ import annotations
 
 import asyncio
@@ -15,7 +15,7 @@ from .const import DEFAULT_SCAN_INTERVAL, DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 
-class SprinklerESPCoordinator(DataUpdateCoordinator[dict]):
+class SuperPoolESPCoordinator(DataUpdateCoordinator[dict]):
     """Polls one ESP32 directly via its HTTP API.
 
     coordinator.data shape:

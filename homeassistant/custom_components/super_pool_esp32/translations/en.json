@@ -1,16 +1,16 @@
-{
+﻿{
 	"config": {
 		"step": {
 			"user": {
-				"title": "Connect to Sprinkler ESP32",
+				"title": "Connect to Super Pool ESP32",
 				"description": "Enter the URL and API key for your ESP32 controller.",
 				"data": {
-					"url": "ESP32 URL (e.g. http://esp-sprinkler.local)",
+					"url": "ESP32 URL (e.g. http://esp-super-pool.local)",
 					"api_key": "API Key"
 				}
 			},
 			"zeroconf_confirm": {
-				"title": "Sprinkler ESP32 discovered",
+				"title": "Super Pool ESP32 discovered",
 				"description": "Found **{name}** at {url}. Enter your API key to confirm.",
 				"data": {
 					"api_key": "API Key"
@@ -28,7 +28,7 @@
 	"options": {
 		"step": {
 			"init": {
-				"title": "Sprinkler options",
+				"title": "Super Pool options",
 				"data": {
 					"default_duration_min": "Default zone run time (minutes)"
 				}

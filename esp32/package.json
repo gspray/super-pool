@@ -1,5 +1,5 @@
-{
-  "name": "esp32-sprinkler",
+﻿{
+  "name": "esp32-super-pool",
   "private": true,
   "scripts": {
     "test":         "cd tests && npm test",

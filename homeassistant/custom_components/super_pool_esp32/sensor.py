@@ -1,4 +1,4 @@
-"""Sensors — active zone, remaining time, last seen."""
+﻿"""Sensors — active zone, remaining time, last seen."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -15,8 +15,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
-from .coordinator import SprinklerESPCoordinator
-from .entity import SprinklerESPEntity
+from .coordinator import SuperPoolESPCoordinator
+from .entity import SuperPoolESPEntity
 
 
 async def async_setup_entry(
@@ -24,7 +24,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coordinator: SprinklerESPCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: SuperPoolESPCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities([
         ActiveZoneSensor(coordinator, entry),
         RemainingTimeSensor(coordinator, entry),
@@ -34,13 +34,13 @@ async def async_setup_entry(
 
 # ── Active zone ───────────────────────────────────────────────────────────────
 
-class ActiveZoneSensor(SprinklerESPEntity, SensorEntity):
+class ActiveZoneSensor(SuperPoolESPEntity, SensorEntity):
     """Name of the currently running zone, or 'None'."""
 
     _attr_icon = "mdi:water-pump"
     _attr_name = "Active Zone"
 
-    def __init__(self, coordinator: SprinklerESPCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: SuperPoolESPCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_active_zone"
 
@@ -58,7 +58,7 @@ class ActiveZoneSensor(SprinklerESPEntity, SensorEntity):
 
 # ── Remaining time ────────────────────────────────────────────────────────────
 
-class RemainingTimeSensor(SprinklerESPEntity, SensorEntity):
+class RemainingTimeSensor(SuperPoolESPEntity, SensorEntity):
     """Seconds remaining in the current manual run (0 when idle)."""
 
     _attr_device_class = SensorDeviceClass.DURATION
@@ -68,7 +68,7 @@ class RemainingTimeSensor(SprinklerESPEntity, SensorEntity):
     _attr_suggested_display_precision = 0
     _attr_name = "Remaining Time"
 
-    def __init__(self, coordinator: SprinklerESPCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: SuperPoolESPCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_remaining_sec"
 
@@ -79,7 +79,7 @@ class RemainingTimeSensor(SprinklerESPEntity, SensorEntity):
 
 # ── Config version ────────────────────────────────────────────────────────────
 
-class ConfigVersionSensor(SprinklerESPEntity, SensorEntity):
+class ConfigVersionSensor(SuperPoolESPEntity, SensorEntity):
     """Current config version on the ESP — useful for diagnosing sync issues."""
 
     _attr_icon = "mdi:file-check-outline"
@@ -87,7 +87,7 @@ class ConfigVersionSensor(SprinklerESPEntity, SensorEntity):
     _attr_name = "Config Version"
     _attr_entity_registry_enabled_default = False  # hidden by default
 
-    def __init__(self, coordinator: SprinklerESPCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: SuperPoolESPCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_config_version"
 
