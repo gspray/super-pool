@@ -2,7 +2,7 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
-			"label": "ESP32: Upload + Monitor",
+			"label": "ESP32: Upload",
 			"type": "shell",
 			"command": "powershell",
 			"args": ["-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}\\upload.ps1"],
